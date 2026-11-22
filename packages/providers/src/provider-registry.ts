@@ -12,20 +12,20 @@ export class ProviderRegistry {
     return this.providers.get(id);
   }
 
+  getDefaultProvider(): MusicProvider | undefined {
+    return this.providers.values().next().value;
+  }
+
   listProviders(): MusicProvider[] {
     return Array.from(this.providers.values());
   }
 
+  /** Registers every provider whose configuration is present. Missing keys simply skip a provider. */
   static createDefault(config: ProviderConfig): ProviderRegistry {
     const registry = new ProviderRegistry();
-    
+
     if (config.apiKey) {
-      try {
-        const lyriaProvider = new GeminiLyriaProvider(config);
-        registry.registerProvider(lyriaProvider);
-      } catch (error) {
-        console.error('Failed to initialize Gemini Lyria provider:', error);
-      }
+      registry.registerProvider(new GeminiLyriaProvider(config));
     }
 
     return registry;
