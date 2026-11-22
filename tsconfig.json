@@ -1,16 +1,8 @@
 {
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "lib": ["ES2022"],
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "allowJs": true,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
-    "allowSyntheticDefaultImports": true
-  }
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/providers" },
+    { "path": "./apps/server" }
+  ]
 }

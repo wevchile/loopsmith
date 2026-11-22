@@ -1,3 +1,14 @@
 packages:
-  - 'apps/*'
-  - 'packages/*'
+  - apps/*
+  - packages/*
+
+# pnpm 10+ reads settings from this file (the "pnpm" field in package.json is ignored).
+overrides:
+  fast-json-stringify: 7.3.6
+
+# Dependencies allowed (true) or explicitly not allowed (false) to run install scripts.
+# esbuild needs its script to set up the native binary used by Vite and tsx.
+# protobufjs (from @google/genai) only runs an optional version check, so it is skipped.
+allowBuilds:
+  esbuild: true
+  protobufjs: false
