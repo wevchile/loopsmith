@@ -340,3 +340,89 @@ describe('unsupported LYRIA_MODEL', () => {
     await rm(tmp, { recursive: true, force: true });
   });
 });
+
+describe('prompt refinement', () => {
+  async function setup(refine: MusicProvider['refinePrompt'], env: Record<string, string> = {}) {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'loopsmith-refine-'));
+    const prompts: Array<{ prompt: string; promptIsFinal?: boolean }> = [];
+    const refineCalls: unknown[] = [];
+    const fake: MusicProvider = {
+      id: 'fake',
+      name: 'Fake',
+      model: 'fake-1',
+      capabilities: { supportsInstrumental: true, supportsVocals: true, supportsReferenceAudio: false, maxDurationSeconds: 60, outputFormats: ['wav'] },
+      async generate(req) {
+        prompts.push(req);
+        return { audioData: tinyWav(), format: 'wav', metadata: { prompt: req.prompt } };
+      },
+      refinePrompt: refine
+        ? async (input) => {
+            refineCalls.push(input);
+            return refine(input);
+          }
+        : undefined,
+    };
+    const registry = new ProviderRegistry();
+    registry.registerProvider(fake);
+    const app = await buildApp(loadConfig({ LOOPSMITH_ROOTS: './data', ...env }, tmp), { logger: false, providerRegistry: registry, audioTools: new AudioTools(false) });
+    const { project } = (await app.inject({ method: 'POST', url: '/api/projects', headers: HOST, payload: { name: 'R', context: '8-bit retro' } })).json();
+    const generate = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, ...payload } });
+    return { tmp, app, prompts, refineCalls, generate };
+  }
+
+  it('sends the refined prompt and records original, context and refined prompt', async () => {
+    const t = await setup(async () => ({ prompt: 'Electronic club track, 126 BPM', model: 'gemini-test' }));
+    const res = await t.generate({ prompt: 'musica electronica para nivel de discoteca', duration: 16, outputFolder: 'SOUNDTRACK' });
+    expect(res.statusCode).toBe(201);
+    const { entry } = res.json();
+    expect(t.refineCalls[0]).toMatchObject({
+      userPrompt: 'musica electronica para nivel de discoteca',
+      projectContext: '8-bit retro',
+      durationSeconds: 16,
+      vocalsEnabled: false,
+      trackType: 'SOUNDTRACK',
+    });
+    expect(t.prompts[0]).toMatchObject({ prompt: 'Electronic club track, 126 BPM', promptIsFinal: true });
+    expect(entry).toMatchObject({
+      prompt: 'musica electronica para nivel de discoteca',
+      context: '8-bit retro',
+      refinedPrompt: 'Electronic club track, 126 BPM',
+      finalPrompt: 'Electronic club track, 126 BPM',
+      refinement: { status: 'refined', model: 'gemini-test' },
+    });
+    await t.app.close();
+    await rm(t.tmp, { recursive: true, force: true });
+  });
+
+  it('falls back to the raw prompt when refinement fails', async () => {
+    const t = await setup(async () => {
+      throw new Error('429 quota');
+    });
+    const res = await t.generate({ prompt: 'boss theme' });
+    expect(res.statusCode).toBe(201);
+    const { entry } = res.json();
+    expect(t.prompts[0].promptIsFinal).toBeUndefined();
+    expect(t.prompts[0].prompt).toContain('boss theme');
+    expect(entry.refinement).toMatchObject({ status: 'failed', error: '429 quota' });
+    expect(entry.refinedPrompt).toBeUndefined();
+    await t.app.close();
+    await rm(t.tmp, { recursive: true, force: true });
+  });
+
+  it('can be skipped per generation or turned off in .env', async () => {
+    const t = await setup(async () => ({ prompt: 'never', model: 'm' }));
+    const skipped = (await t.generate({ prompt: 'x', refinePrompt: false })).json().entry;
+    expect(skipped.refinement.status).toBe('skipped');
+    expect(t.refineCalls).toHaveLength(0);
+    await t.app.close();
+    await rm(t.tmp, { recursive: true, force: true });
+
+    const off = await setup(async () => ({ prompt: 'never', model: 'm' }), { LOOPSMITH_PROMPT_REFINE: 'false' });
+    expect((await off.generate({ prompt: 'x' })).json().entry.refinement.status).toBe('skipped');
+    const forced = (await off.generate({ prompt: 'x', refinePrompt: true })).json().entry;
+    expect(forced.refinement.status).toBe('refined');
+    await off.app.close();
+    await rm(off.tmp, { recursive: true, force: true });
+  });
+});

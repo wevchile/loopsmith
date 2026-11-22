@@ -77,6 +77,8 @@ So `pnpm install` works without running `pnpm approve-builds`. The lockfile is a
 | `GEMINI_API_VERSION` | `v1beta` | Gemini API version. Lyria is only served on `v1beta`; keep the default. |
 | `LYRIA_MODEL` | `lyria-3.5` | Lyria model, see "Lyria models" below. |
 | `LYRIA_OUTPUT_FORMAT` | `mp3` | `mp3` or `wav` (`wav` only with `lyria-3.5`). |
+| `LOOPSMITH_PROMPT_REFINE` | `true` | Rewrite each request into a detailed Lyria prompt with Gemini first. Can be switched off per generation. |
+| `LOOPSMITH_REFINE_MODEL` | `gemini-3.8-flash` | Gemini text model that writes the Lyria prompt. |
 | `LOOPSMITH_TRIM_TO_DURATION` | `true` | Cut results longer than the duration field to that length, with a fade-out. |
 | `LOOPSMITH_KEEP_UNTRIMMED` | `true` | Keep the full model output in `<project>/.loopsmith-untrimmed`. |
 | `LOOPSMITH_FADE_OUT_SECONDS` | `1.5` | Fade-out length when trimming. |
@@ -190,6 +192,18 @@ Set `LYRIA_MODEL` in `.env` and restart. Status and prices from the Gemini API d
 | `lyria-realtime-exp` | Experimental | Endless live stream | Raw PCM over WebSocket | - | Not supported: it streams live and cannot return a file. Loopsmith shows a configuration error if selected. |
 
 There is no free tier for Lyria. Every model above (except RealTime) is called the same way, with the Interactions API on `v1beta`. Unknown model ids are passed through the same way, so new Lyria models can be tried from `.env` without code changes.
+
+### Prompt refinement
+
+Short prompts like "musica electronica para una discoteca" give Lyria little to work with. With `LOOPSMITH_PROMPT_REFINE=true` (the default), a Gemini text model (`LOOPSMITH_REFINE_MODEL`, default `gemini-3.8-flash`, the newest stable Flash model) first writes a detailed English prompt following the [Lyria prompt guide](https://ai.google.dev/gemini-api/docs/lyria-prompt-guide): genre first, instruments and how they sound, BPM, key, mood, a timed structure that fits the length, production style, seamless looping for game music, and the instrumental instruction when vocals are off.
+
+It receives tagged sections: `USER_PROMPT` (highest priority), `SETTINGS` (length, vocals, Lyria model, for example the fixed 30 seconds of the clip model), `BASE_TRACK` (the description of the base track when "use as base" is on), `TRACK_TYPE` (from the output folder: SOUNDTRACK, SFX, VO, AMBIENCE or OTHER) and `PROJECT_CONTEXT` (lowest priority).
+
+**Your prompt always wins.** The system instruction and the request both state that when the project context conflicts with your prompt (context "8-bit retro", prompt "musica electronica"), the conflicting part of the context is dropped; the context only fills gaps. Example from a real run with context `8-bit retro`, prompt `musica electronica para nivel de discoteca, 16 segundos` and `lyria-3-clip-preview`:
+
+> High-energy nightclub electronic dance music at 126 BPM in F minor, designed to loop seamlessly without fade-in or fade-out. Driving four-on-the-floor kick, deep sidechained sub-bass, bright synth chord stabs, and crisp hi-hats create an intense dancefloor groove. [0:00 - 0:16] Immediately drops into the full driving peak-time rhythm with punchy kicks, pulsing bassline, and filtered synth sweeps. [0:16 - 0:30] Introduces sharp claps and energetic arpeggios, sustaining high club energy that seamlessly transitions back into the beginning. Crisp, modern, polished club mix with heavy low-end impact. Instrumental only, no vocals, no singing, no spoken words.
+
+The history stores your original prompt, the project context, the refined prompt and the exact text sent to Lyria (shown in a collapsible section of the history). A switch in the generation panel skips refinement for one generation. If refinement fails (quota, network, empty answer) a warning is logged and the raw prompt is used, so generation never breaks because of it. The refinement call costs a fraction of a cent.
 
 ### Duration
 

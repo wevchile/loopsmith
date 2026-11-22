@@ -3,6 +3,13 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { GenerateRequest, GenerateResult, ProviderCapabilities } from '@loopsmith/core';
 import type { MusicProvider, ProviderConfig } from './provider.js';
+import {
+  DEFAULT_REFINE_MODEL,
+  REFINER_SYSTEM_INSTRUCTION,
+  buildRefinerUserMessage,
+  cleanRefinedPrompt,
+  type RefineInput,
+} from './prompt-refiner.js';
 
 /**
  * Default Lyria model: the only stable (non-preview) one, for full songs.
@@ -127,6 +134,7 @@ export interface GenAIClientLike {
     generateContent(params: {
       model: string;
       contents: Array<{ role: string; parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> }>;
+      config?: { systemInstruction?: string; temperature?: number };
     }): Promise<{ text?: string | undefined }>;
   };
 }
@@ -298,6 +306,7 @@ export class GeminiLyriaProvider implements MusicProvider {
 
   private readonly client: GenAIClientLike;
   private readonly analysisModel: string;
+  readonly refineModel: string;
   private readonly outputFormat: 'mp3' | 'wav';
 
   constructor(config: ProviderConfig, client?: GenAIClientLike) {
@@ -322,12 +331,14 @@ export class GeminiLyriaProvider implements MusicProvider {
       outputFormats: this.modelInfo.supportsWav ? ['mp3', 'wav'] : ['mp3'],
     };
     this.analysisModel = config.analysisModel || DEFAULT_ANALYSIS_MODEL;
+    this.refineModel = config.refineModel || DEFAULT_REFINE_MODEL;
     this.outputFormat = config.outputFormat === 'wav' ? 'wav' : 'mp3';
     this.client = client ?? createGenAIClient(config.apiKey as string, config.apiVersion || DEFAULT_API_VERSION);
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResult> {
-    const prompt = buildLyriaPrompt(request, this.modelInfo);
+    // A refined prompt already contains length, structure and the instrumental instruction.
+    const prompt = request.promptIsFinal ? request.prompt.trim() : buildLyriaPrompt(request, this.modelInfo);
     const requested = request.outputFormat ?? this.outputFormat;
     // Only Lyria 3.5 documents WAV output; ask the other models for their native MP3.
     const format = requested === 'wav' && this.modelInfo.supportsWav ? 'wav' : 'mp3';
@@ -364,6 +375,18 @@ export class GeminiLyriaProvider implements MusicProvider {
         mimeType: parsed.mimeType,
       },
     };
+  }
+
+  /** Asks a Gemini text model to turn the request into a polished Lyria prompt. */
+  async refinePrompt(input: Omit<RefineInput, 'lyriaModel'>): Promise<{ prompt: string; model: string }> {
+    const response = await this.client.models.generateContent({
+      model: this.refineModel,
+      contents: [{ role: 'user', parts: [{ text: buildRefinerUserMessage({ ...input, lyriaModel: this.modelInfo }) }] }],
+      config: { systemInstruction: REFINER_SYSTEM_INSTRUCTION, temperature: 0.7 },
+    });
+    const text = response.text?.trim();
+    if (!text) throw new Error(`${this.refineModel} returned an empty prompt`);
+    return { prompt: cleanRefinedPrompt(text, input.vocalsEnabled, INSTRUMENTAL_DIRECTIVE), model: this.refineModel };
   }
 
   async analyzeReference(audioPath: string): Promise<string> {

@@ -32,6 +32,13 @@ export function HistoryPanel({ history, onSelectTrack }: Props) {
                   : t('lengthSeconds', { seconds: h.audio.finalSeconds.toFixed(1) })}
               </div>
             )}
+            {h.refinement?.status === 'failed' && <div className="small error-text">{t('refineFailed')}</div>}
+            {(h.finalPrompt || h.refinedPrompt) && (
+              <details className="small" onClick={(e) => e.stopPropagation()}>
+                <summary>{h.refinement?.status === 'refined' ? t('refinedPrompt', { model: h.refinement.model }) : t('sentPrompt')}</summary>
+                <pre className="lyrics">{h.finalPrompt ?? h.refinedPrompt}</pre>
+              </details>
+            )}
             {h.lyrics && (
               <details className="small" onClick={(e) => e.stopPropagation()}>
                 <summary>{t('lyrics')}</summary>

@@ -2,9 +2,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
 import { rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { GeneratedAudioInfo, GenerationHistory } from '@loopsmith/core';
+import type { GeneratedAudioInfo, GenerationHistory, PromptRefinementInfo } from '@loopsmith/core';
 import { toSafeName } from '@loopsmith/core';
-import type { ProviderRegistry } from '@loopsmith/providers';
+import { trackTypeFromFolder, type ProviderRegistry } from '@loopsmith/providers';
 import { HttpError, toPosix, type Storage } from '../storage.js';
 import type { AudioTools } from '../audio-length.js';
 import { resolveTrackPath } from '../manifest-service.js';
@@ -22,17 +22,24 @@ interface GenerateBody {
   referenceTrackId?: string;
   outputFolder?: string;
   outputName?: string;
+  /** Per generation switch for prompt refinement (defaults to LOOPSMITH_PROMPT_REFINE). */
+  refinePrompt?: boolean;
 }
 
-/** Joins project context, optional reference description and the user prompt. */
+/**
+ * Joins the user prompt, optional base track description and project context into the raw prompt
+ * used when refinement is off or fails. The user prompt comes first and wins over the context.
+ */
 export function composePrompt(prompt: string, context?: string, referenceDescription?: string): string {
   const parts: string[] = [];
-  if (context?.trim()) parts.push(`Project style and context: ${context.trim()}`);
   if (referenceDescription) {
+    parts.push(`Create a new variation of this base track with these changes: ${prompt.trim()}`);
     parts.push(`Base track description: ${referenceDescription}`);
-    parts.push(`Create a new variation of that base track with these changes: ${prompt.trim()}`);
   } else {
     parts.push(prompt.trim());
+  }
+  if (context?.trim()) {
+    parts.push(`Project style and context (lower priority; ignore anything that conflicts with the request above): ${context.trim()}`);
   }
   return parts.join('\n\n');
 }
@@ -53,6 +60,8 @@ export interface GenerateRoutesOptions {
   providerRegistry: ProviderRegistry;
   audioTools?: AudioTools;
   trim?: TrimOptions;
+  /** Default for prompt refinement when the request does not say. */
+  promptRefine?: boolean;
 }
 
 const round = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * 100) / 100);
@@ -101,7 +110,7 @@ async function enforceDuration(
 
 export const generateRoutes: FastifyPluginAsync<GenerateRoutesOptions> = async (
   fastify,
-  { storage, providerRegistry, audioTools, trim }
+  { storage, providerRegistry, audioTools, trim, promptRefine = true }
 ) => {
   fastify.get('/providers', async () => ({
     providers: providerRegistry.listProviders().map((p) => ({
@@ -154,9 +163,36 @@ export const generateRoutes: FastifyPluginAsync<GenerateRoutesOptions> = async (
         : undefined;
     const composedPrompt = composePrompt(prompt, project.context, referenceDescription);
 
+    // Prompt refinement: a text model writes the final prompt. The user prompt always wins over
+    // the project context (see prompt-refiner.ts). Any failure falls back to the raw prompt.
+    const wantsRefine = body.refinePrompt ?? promptRefine;
+    let refinedPrompt: string | undefined;
+    let refinement: PromptRefinementInfo = { status: 'skipped' };
+    if (wantsRefine && provider.refinePrompt) {
+      try {
+        const refined = await provider.refinePrompt({
+          userPrompt: prompt,
+          projectContext: project.context,
+          durationSeconds: duration,
+          vocalsEnabled,
+          referenceDescription,
+          trackType: trackTypeFromFolder(outputFolderRel),
+          outputFolder: outputFolderRel,
+        });
+        refinedPrompt = refined.prompt;
+        refinement = { status: 'refined', model: refined.model };
+      } catch (error) {
+        const message = (error as Error).message;
+        request.log.warn(`Prompt refinement failed, using the raw prompt: ${message}`);
+        refinement = { status: 'failed', error: message.slice(0, 500) };
+      }
+    }
+
     let result;
     try {
-      result = await provider.generate({ prompt: composedPrompt, vocalsEnabled, duration });
+      result = refinedPrompt
+        ? await provider.generate({ prompt: refinedPrompt, promptIsFinal: true, vocalsEnabled, duration })
+        : await provider.generate({ prompt: composedPrompt, vocalsEnabled, duration });
     } catch (error) {
       request.log.error(error);
       throw new HttpError(502, (error as Error).message, 'GENERATION_FAILED');
@@ -176,7 +212,11 @@ export const generateRoutes: FastifyPluginAsync<GenerateRoutesOptions> = async (
       id: nanoid(10),
       projectId: project.id,
       prompt,
+      context: project.context?.trim() || undefined,
       composedPrompt,
+      refinedPrompt,
+      finalPrompt: typeof result.metadata?.prompt === 'string' ? result.metadata.prompt : (refinedPrompt ?? composedPrompt),
+      refinement,
       model: provider.model,
       parameters: { providerId: provider.id, duration, outputFolder: outputFolderRel, format: result.format },
       vocalsEnabled,

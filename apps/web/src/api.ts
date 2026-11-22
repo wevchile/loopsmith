@@ -36,6 +36,10 @@ export interface GenerationHistory {
   referenceDescription?: string;
   lyrics?: string;
   structure?: string;
+  context?: string;
+  refinedPrompt?: string;
+  finalPrompt?: string;
+  refinement?: { status: 'refined' | 'skipped' | 'failed'; model?: string; error?: string };
   audio?: {
     requestedSeconds?: number;
     generatedSeconds?: number;
@@ -66,6 +70,7 @@ export interface Health {
     maxDurationSeconds?: number;
     fixedDurationSeconds?: number;
     trimToDuration?: boolean;
+    promptRefine?: { enabled: boolean; model: string };
     reason?: string;
     message?: string;
   };
@@ -166,5 +171,6 @@ export const api = {
     duration?: number;
     referenceTrackId?: string;
     outputFolder: string;
+    refinePrompt?: boolean;
   }) => request<{ entry: GenerationHistory }>('/api/generate', { method: 'POST', json: body }).then((d) => d.entry),
 };

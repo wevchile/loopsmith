@@ -8,6 +8,7 @@ export interface GenerateInput {
   duration?: number;
   referenceTrackId?: string;
   outputFolder: string;
+  refinePrompt?: boolean;
 }
 
 interface Props {
@@ -36,6 +37,7 @@ export function GenerationPanel({
   const [vocals, setVocals] = useState(project.defaultVocalsEnabled);
   const [duration, setDuration] = useState('');
   const [outputFolder, setOutputFolder] = useState(defaultFolder || 'SOUNDTRACK');
+  const [refine, setRefine] = useState(true);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -49,6 +51,7 @@ export function GenerationPanel({
   }, [defaultFolder]);
 
   const available = health?.generation.available ?? false;
+  const refineAvailable = health?.generation.promptRefine?.enabled ?? false;
   const referenceReady = useReference && selectedTrack && selectedTrack.exists !== false;
 
   const submit = async () => {
@@ -61,6 +64,7 @@ export function GenerationPanel({
         duration: duration ? Number(duration) : undefined,
         referenceTrackId: referenceReady ? selectedTrack.id : undefined,
         outputFolder,
+        refinePrompt: refineAvailable ? refine : undefined,
       });
       setResult({ ok: true, text: t('generationDone', { file }) });
       setPrompt('');
@@ -91,6 +95,15 @@ export function GenerationPanel({
           {t('vocals')} <span className="muted">({vocals ? t('withVocals') : t('instrumentalOnly')})</span>
         </span>
       </label>
+
+      {refineAvailable && (
+        <label className="switch">
+          <input type="checkbox" checked={refine} onChange={(e) => setRefine(e.target.checked)} disabled={busy} />
+          <span>
+            {t('refinePrompt')} <span className="muted">({health?.generation.promptRefine?.model})</span>
+          </span>
+        </label>
+      )}
 
       <label className="switch">
         <input type="checkbox" checked={useReference} onChange={(e) => onUseReferenceChange(e.target.checked)} disabled={busy} />

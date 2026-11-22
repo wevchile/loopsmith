@@ -32,6 +32,7 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
       apiKey: config.geminiApiKey,
       lyriaModel: config.lyriaModel,
       analysisModel: config.analysisModel,
+      refineModel: config.refineModel,
       apiVersion: config.geminiApiVersion,
       outputFormat: config.outputFormat,
     });
@@ -97,6 +98,7 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
             maxDurationSeconds: provider.capabilities.maxDurationSeconds,
             fixedDurationSeconds: provider.capabilities.fixedDurationSeconds,
             trimToDuration: config.trimToDuration,
+            promptRefine: { enabled: config.promptRefine && Boolean(provider.refinePrompt), model: config.refineModel },
           }
         : providerRegistry.errors.length > 0
           ? { available: false, reason: 'PROVIDER_CONFIG_ERROR', message: providerRegistry.errors[0] }
@@ -115,6 +117,7 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
     storage,
     providerRegistry,
     audioTools,
+    promptRefine: config.promptRefine,
     trim: { enabled: config.trimToDuration, keepUntrimmed: config.keepUntrimmed, fadeOutSeconds: config.fadeOutSeconds },
   });
   await app.register(manifestRoutes, { prefix: '/api', storage });

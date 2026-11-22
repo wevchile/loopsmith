@@ -32,10 +32,18 @@ export interface GeneratedAudioInfo {
   note?: string;
 }
 
+export interface PromptRefinementInfo {
+  /** refined = the model wrote the prompt; skipped = turned off; failed = error, raw prompt used. */
+  status: 'refined' | 'skipped' | 'failed';
+  model?: string;
+  error?: string;
+}
+
 export interface GenerationHistory {
   id: string;
   projectId: string;
   prompt: string;
+  /** Raw combination of project context, base track description and user prompt (used when refinement is off or fails). */
   composedPrompt: string;
   model: string;
   parameters: Record<string, unknown>;
@@ -46,6 +54,13 @@ export interface GenerationHistory {
   lyrics?: string;
   /** Raw structure text returned by the model (for example "[[A0]] [[B1]]"). */
   structure?: string;
+  /** Project context that was available to the prompt (lower priority than the user prompt). */
+  context?: string;
+  /** Prompt written by the refinement model, when refinement ran. */
+  refinedPrompt?: string;
+  /** Exact text sent to the music model. */
+  finalPrompt?: string;
+  refinement?: PromptRefinementInfo;
   /** Requested vs generated vs saved length, and how the file was trimmed. */
   audio?: GeneratedAudioInfo;
   timestamp: string;
@@ -125,6 +140,8 @@ export interface GenerateRequest {
   vocalsEnabled: boolean;
   /** Desired duration in seconds. Providers may treat it as a hint. */
   duration?: number;
+  /** The prompt was already refined: send it as is (no extra length or instrumental text). */
+  promptIsFinal?: boolean;
   outputFormat?: AudioOutputFormat;
   referenceTrack?: {
     path: string;

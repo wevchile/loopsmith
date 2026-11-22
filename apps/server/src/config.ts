@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { DEFAULT_ANALYSIS_MODEL, DEFAULT_API_VERSION, DEFAULT_LYRIA_MODEL } from '@loopsmith/providers';
+import { DEFAULT_ANALYSIS_MODEL, DEFAULT_API_VERSION, DEFAULT_LYRIA_MODEL, DEFAULT_REFINE_MODEL } from '@loopsmith/providers';
 
 export interface Config {
   port: number;
@@ -11,6 +11,9 @@ export interface Config {
   geminiApiKey?: string;
   lyriaModel: string;
   analysisModel: string;
+  /** Rewrite prompts with a Gemini text model before calling Lyria (default on; can be skipped per generation). */
+  promptRefine: boolean;
+  refineModel: string;
   geminiApiVersion: string;
   outputFormat: 'mp3' | 'wav';
   /** Cut generated audio to the requested duration (Lyria has no duration parameter). */
@@ -60,6 +63,8 @@ export function loadConfig(env: NodeJS.ProcessEnv, repoRoot: string): Config {
     geminiApiKey: cleanApiKey(env.GEMINI_API_KEY),
     lyriaModel: env.LYRIA_MODEL?.trim() || DEFAULT_LYRIA_MODEL,
     analysisModel: env.GEMINI_ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL,
+    promptRefine: flag(env.LOOPSMITH_PROMPT_REFINE, true),
+    refineModel: env.LOOPSMITH_REFINE_MODEL?.trim() || DEFAULT_REFINE_MODEL,
     geminiApiVersion: env.GEMINI_API_VERSION?.trim() || DEFAULT_API_VERSION,
     outputFormat: env.LYRIA_OUTPUT_FORMAT?.trim().toLowerCase() === 'wav' ? 'wav' : 'mp3',
     trimToDuration: flag(env.LOOPSMITH_TRIM_TO_DURATION, true),
