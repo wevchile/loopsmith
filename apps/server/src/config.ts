@@ -1,24 +1,49 @@
 import path from 'node:path';
+import { DEFAULT_ANALYSIS_MODEL, DEFAULT_LYRIA_MODEL } from '@loopsmith/providers';
 
 export interface Config {
   port: number;
-  host: string;
+  /** Always 127.0.0.1: the API is only reachable from this computer. */
+  host: '127.0.0.1';
+  repoRoot: string;
+  /** Absolute folders where projects can be created, read and written. */
   allowedRoots: string[];
   geminiApiKey?: string;
-  googleCloudProject?: string;
-  googleCloudLocation?: string;
+  lyriaModel: string;
+  analysisModel: string;
+  outputFormat: 'mp3' | 'wav';
 }
 
-export function loadConfig(): Config {
-  const rootsEnv = process.env.LOOPSMITH_ROOTS || './loopsmith-data';
-  const roots = rootsEnv.split(',').map(r => path.resolve(r.trim()));
+const PLACEHOLDER_KEYS = new Set(['', 'your_gemini_api_key_here', 'changeme']);
+
+function cleanApiKey(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value || PLACEHOLDER_KEYS.has(value) || value.startsWith('your_')) return undefined;
+  return value;
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv, repoRoot: string): Config {
+  const rootsEnv = env.LOOPSMITH_ROOTS?.trim() || './loopsmith-data';
+  const allowedRoots = [
+    ...new Set(
+      rootsEnv
+        .split(',')
+        .map((r) => r.trim())
+        .filter(Boolean)
+        .map((r) => path.resolve(repoRoot, r))
+    ),
+  ];
+
+  const port = Number.parseInt(env.LOOPSMITH_SERVER_PORT || '3001', 10);
 
   return {
-    port: parseInt(process.env.PORT || '3001', 10),
+    port: Number.isFinite(port) ? port : 3001,
     host: '127.0.0.1',
-    allowedRoots: roots,
-    geminiApiKey: process.env.GEMINI_API_KEY,
-    googleCloudProject: process.env.GOOGLE_CLOUD_PROJECT,
-    googleCloudLocation: process.env.GOOGLE_CLOUD_LOCATION,
+    repoRoot,
+    allowedRoots,
+    geminiApiKey: cleanApiKey(env.GEMINI_API_KEY),
+    lyriaModel: env.LYRIA_MODEL?.trim() || DEFAULT_LYRIA_MODEL,
+    analysisModel: env.GEMINI_ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL,
+    outputFormat: env.LYRIA_OUTPUT_FORMAT?.trim().toLowerCase() === 'wav' ? 'wav' : 'mp3',
   };
 }

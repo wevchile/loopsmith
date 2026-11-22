@@ -44,3 +44,16 @@ describe('classifyAudioFile', () => {
     expect(classifyAudioFile('line_01.wav', 'voice/character', 8)).toBe('VO');
   });
 });
+
+describe('classifyAudioFile whole-word matching', () => {
+  it('does not match keywords inside unrelated words', () => {
+    expect(classifyAudioFile('guitar_riff.ogg', 'misc')).toBe('OTHER');
+    expect(classifyAudioFile('volume_test.wav', 'misc')).toBe('OTHER');
+  });
+
+  it('handles camelCase and plural folder names', () => {
+    expect(classifyAudioFile('BossTheme.ogg', 'assets')).toBe('SOUNDTRACK');
+    expect(classifyAudioFile('door.wav', 'Sounds/effects')).toBe('SFX');
+    expect(classifyAudioFile('hero_01.wav', 'voices')).toBe('VO');
+  });
+});

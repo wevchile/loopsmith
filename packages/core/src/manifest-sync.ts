@@ -9,6 +9,8 @@ export function computeManifestDiff(
     removed: [],
     renamed: [],
     moved: [],
+    updated: [],
+    unchanged: 0,
   };
 
   if (!oldManifest) {
@@ -35,11 +37,7 @@ export function computeManifestDiff(
       processedNewIds.add(newEntry.id);
       processedOldIds.add(oldEntryById.id);
 
-      if (oldEntryById.name !== newEntry.name) {
-        diff.renamed.push({ old: oldEntryById, new: newEntry });
-      } else if (oldEntryById.folder !== newEntry.folder || oldEntryById.relativePath !== newEntry.relativePath) {
-        diff.moved.push({ old: oldEntryById, new: newEntry });
-      }
+      classifyPair(diff, oldEntryById, newEntry);
       continue;
     }
 
@@ -49,11 +47,7 @@ export function computeManifestDiff(
         processedNewIds.add(newEntry.id);
         processedOldIds.add(oldEntryByHash.id);
 
-        if (oldEntryByHash.name !== newEntry.name) {
-          diff.renamed.push({ old: oldEntryByHash, new: newEntry });
-        } else if (oldEntryByHash.folder !== newEntry.folder || oldEntryByHash.relativePath !== newEntry.relativePath) {
-          diff.moved.push({ old: oldEntryByHash, new: newEntry });
-        }
+        classifyPair(diff, oldEntryByHash, newEntry);
         continue;
       }
     }
@@ -73,6 +67,28 @@ export function computeManifestDiff(
   return diff;
 }
 
+function hasContentChange(a: ManifestEntry, b: ManifestEntry): boolean {
+  return (
+    a.type !== b.type ||
+    a.hash !== b.hash ||
+    a.duration !== b.duration ||
+    a.loopMarkers?.start !== b.loopMarkers?.start ||
+    a.loopMarkers?.end !== b.loopMarkers?.end
+  );
+}
+
+function classifyPair(diff: ManifestSyncDiff, oldEntry: ManifestEntry, newEntry: ManifestEntry): void {
+  if (oldEntry.name !== newEntry.name) {
+    diff.renamed.push({ old: oldEntry, new: newEntry });
+  } else if (oldEntry.folder !== newEntry.folder || oldEntry.relativePath !== newEntry.relativePath) {
+    diff.moved.push({ old: oldEntry, new: newEntry });
+  } else if (hasContentChange(oldEntry, newEntry)) {
+    diff.updated.push({ old: oldEntry, new: newEntry });
+  } else {
+    diff.unchanged += 1;
+  }
+}
+
 export function applyManifestDiff(
   currentEntries: ManifestEntry[],
   diff: ManifestSyncDiff
@@ -89,6 +105,11 @@ export function applyManifestDiff(
   }
 
   for (const { old, new: newEntry } of diff.moved) {
+    entriesById.delete(old.id);
+    entriesById.set(newEntry.id, newEntry);
+  }
+
+  for (const { old, new: newEntry } of diff.updated) {
     entriesById.delete(old.id);
     entriesById.set(newEntry.id, newEntry);
   }

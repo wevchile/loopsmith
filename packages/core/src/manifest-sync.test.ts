@@ -156,6 +156,8 @@ describe('manifest-sync', () => {
         removed: [],
         renamed: [],
         moved: [],
+        updated: [],
+        unchanged: 0,
       };
 
       const result = applyManifestDiff(current, diff);
@@ -177,6 +179,8 @@ describe('manifest-sync', () => {
         ],
         renamed: [],
         moved: [],
+        updated: [],
+        unchanged: 0,
       };
 
       const result = applyManifestDiff(current, diff);
@@ -200,6 +204,8 @@ describe('manifest-sync', () => {
           },
         ],
         moved: [],
+        updated: [],
+        unchanged: 0,
       };
 
       const result = applyManifestDiff(current, diff);
@@ -207,5 +213,20 @@ describe('manifest-sync', () => {
       expect(result).toHaveLength(1);
       expect(result[0].name).toBe('new.mp3');
     });
+  });
+});
+
+describe('computeManifestDiff updates', () => {
+  it('reports type or hash changes on the same entry as updated, and counts unchanged entries', () => {
+    const base = { id: '1', name: 'a.wav', type: 'OTHER' as const, folder: 'x', relativePath: 'x/a.wav', hash: 'h1' };
+    const same = { id: '2', name: 'b.wav', type: 'SFX' as const, folder: 'x', relativePath: 'x/b.wav' };
+    const diff = computeManifestDiff(
+      { version: '1.0', gameRepo: 'g', entries: [base, same] },
+      { version: '1.0', gameRepo: 'g', entries: [{ ...base, type: 'SFX', hash: 'h2' }, same] }
+    );
+    expect(diff.updated).toHaveLength(1);
+    expect(diff.unchanged).toBe(1);
+    expect(diff.added).toHaveLength(0);
+    expect(diff.removed).toHaveLength(0);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
-import { isPathSafe, validatePathSafety } from './path-safety.js';
+import { isPathSafe, validatePathSafety, isPathInside, resolveInside, isValidEntryName, toSafeName } from './path-safety.js';
 
 describe('path-safety', () => {
   const allowedRoots = [
@@ -45,5 +45,45 @@ describe('path-safety', () => {
       expect(() => validatePathSafety('/etc/passwd', allowedRoots)).toThrow('Path traversal attempt detected');
       expect(() => validatePathSafety('/workspace/loopsmith-data/../secrets', allowedRoots)).toThrow('Path traversal attempt detected');
     });
+  });
+});
+
+describe('isPathInside', () => {
+  it('does not treat sibling folders with a shared prefix as inside', () => {
+    expect(isPathInside(path.resolve('/data-other/x'), path.resolve('/data'))).toBe(false);
+    expect(isPathInside(path.resolve('/data/x'), path.resolve('/data'))).toBe(true);
+  });
+});
+
+describe('resolveInside', () => {
+  const base = path.resolve('/workspace/loopsmith-data/game');
+
+  it('resolves nested relative paths', () => {
+    expect(resolveInside(base, 'SOUNDTRACK/boss')).toBe(path.join(base, 'SOUNDTRACK', 'boss'));
+    expect(resolveInside(base, 'SFX\\ui')).toBe(path.join(base, 'SFX', 'ui'));
+    expect(resolveInside(base, '')).toBe(base);
+  });
+
+  it('rejects traversal and absolute paths', () => {
+    expect(() => resolveInside(base, '../other')).toThrow();
+    expect(() => resolveInside(base, 'a/../../other')).toThrow();
+    expect(() => resolveInside(base, '/etc/passwd')).toThrow();
+    expect(() => resolveInside(base, 'C:/Windows')).toThrow();
+  });
+});
+
+describe('isValidEntryName / toSafeName', () => {
+  it('validates names', () => {
+    expect(isValidEntryName('boss-music')).toBe(true);
+    expect(isValidEntryName('a/b')).toBe(false);
+    expect(isValidEntryName('..')).toBe(false);
+    expect(isValidEntryName('CON')).toBe(false);
+    expect(isValidEntryName('')).toBe(false);
+  });
+
+  it('creates safe names', () => {
+    expect(toSafeName('Canción del jefe!')).toBe('Cancion_del_jefe');
+    expect(toSafeName('../../etc')).toBe('etc');
+    expect(toSafeName('???')).toBe('untitled');
   });
 });

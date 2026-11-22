@@ -1,97 +1,40 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { Storage } from '../storage.js';
-import { manifestSchema } from '@loopsmith/core';
-import { computeManifestDiff } from '@loopsmith/core';
+import { HttpError, type Storage } from '../storage.js';
+import { applyManifest, previewManifest } from '../manifest-service.js';
 
-export const manifestRoutes: FastifyPluginAsync<{
-  storage: Storage;
-  allowedRoots: string[];
-}> = async (fastify, opts) => {
-  const { storage, allowedRoots } = opts;
+interface ManifestBody {
+  projectId?: string;
+  /** Absolute path to the manifest .json. Defaults to the manifest already linked to the project. */
+  manifestPath?: string;
+}
 
-  fastify.post<{
-    Body: {
-      projectId: string;
-      manifestPath: string;
-    };
-  }>('/manifest/preview', async (request, reply) => {
-    const { projectId, manifestPath } = request.body;
+export const manifestRoutes: FastifyPluginAsync<{ storage: Storage }> = async (fastify, { storage }) => {
+  async function resolveTarget(body: ManifestBody | undefined) {
+    const project = await storage.getProject(body?.projectId ?? '');
+    const manifestPath = body?.manifestPath?.trim() || project.manifestPath;
+    if (!manifestPath) throw new HttpError(400, 'manifestPath is required', 'MANIFEST_PATH_REQUIRED');
+    return { project, manifestPath };
+  }
 
-    let project = null;
-    for (const root of allowedRoots) {
-      const projects = await storage.listProjects(root);
-      project = projects.find(p => p.id === projectId);
-      if (project) break;
-    }
-
-    if (!project) {
-      return reply.code(404).send({ error: 'Project not found' });
-    }
-
-    const newManifest = await storage.readManifest(manifestPath);
-    if (!newManifest) {
-      return reply.code(404).send({ error: 'Manifest not found' });
-    }
-
-    const validationResult = manifestSchema.safeParse(newManifest);
-    if (!validationResult.success) {
-      return reply.code(400).send({
-        error: 'Invalid manifest format',
-        details: validationResult.error.errors,
-      });
-    }
-
-    const oldManifestPath = project.manifestPath;
-    const oldManifest = oldManifestPath ? await storage.readManifest(oldManifestPath) : null;
-
-    const diff = computeManifestDiff(oldManifest, newManifest);
-
-    return {
-      diff,
-      manifest: newManifest,
-    };
+  // Shows what would change (added, removed, renamed, moved, updated) without touching anything.
+  fastify.post<{ Body: ManifestBody }>('/manifest/preview', async (request) => {
+    const { project, manifestPath } = await resolveTarget(request.body);
+    return previewManifest(storage, project, manifestPath);
   });
 
-  fastify.post<{
-    Body: {
-      projectId: string;
-      manifestPath: string;
-    };
-  }>('/manifest/link', async (request, reply) => {
-    const { projectId, manifestPath } = request.body;
+  // Links (first time) or re-syncs the manifest. Generated audio is never modified.
+  const apply = async (request: { body: ManifestBody }) => {
+    const { project, manifestPath } = await resolveTarget(request.body);
+    return applyManifest(storage, project, manifestPath);
+  };
+  fastify.post<{ Body: ManifestBody }>('/manifest/apply', apply);
+  fastify.post<{ Body: ManifestBody }>('/manifest/link', apply);
 
-    let project = null;
-    for (const root of allowedRoots) {
-      const projects = await storage.listProjects(root);
-      project = projects.find(p => p.id === projectId);
-      if (project) break;
-    }
-
-    if (!project) {
-      return reply.code(404).send({ error: 'Project not found' });
-    }
-
-    const manifest = await storage.readManifest(manifestPath);
-    if (!manifest) {
-      return reply.code(404).send({ error: 'Manifest not found' });
-    }
-
-    const validationResult = manifestSchema.safeParse(manifest);
-    if (!validationResult.success) {
-      return reply.code(400).send({
-        error: 'Invalid manifest format',
-        details: validationResult.error.errors,
-      });
-    }
-
-    const updated = {
-      ...project,
-      manifestPath,
-      updatedAt: new Date().toISOString(),
-    };
-
+  fastify.delete<{ Params: { id: string } }>('/projects/:id/manifest', async (request) => {
+    const project = await storage.getProject(request.params.id);
+    await storage.deleteManifestSnapshot(project.path);
+    const updated = { ...project, manifestPath: undefined, manifestSyncedAt: undefined, updatedAt: new Date().toISOString() };
     await storage.writeProject(updated);
-
-    return { success: true, project: updated };
+    return { project: updated };
   });
 };
