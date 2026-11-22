@@ -131,15 +131,37 @@ export class Storage {
 
   // ---------- history ----------
 
+  /** Reads history.json. Entries from before track statuses existed get status "candidate" (migration default). */
   async readHistory(projectPath: string): Promise<GenerationHistory[]> {
     this.validatePath(projectPath);
-    return (await readJson<GenerationHistory[]>(path.join(projectPath, HISTORY_FILE))) ?? [];
+    const history = (await readJson<GenerationHistory[]>(path.join(projectPath, HISTORY_FILE))) ?? [];
+    return history.map((entry) => (entry.status ? entry : { ...entry, status: 'candidate' as const }));
+  }
+
+  private historyLocks = new Map<string, Promise<unknown>>();
+
+  /** Read-modify-write of history.json, serialized per project so parallel requests do not lose updates. */
+  async updateHistory<T>(projectPath: string, change: (history: GenerationHistory[]) => Promise<T> | T): Promise<T> {
+    const key = path.resolve(projectPath).toLowerCase();
+    const previous = this.historyLocks.get(key) ?? Promise.resolve();
+    const run = previous.catch(() => undefined).then(async () => {
+      const history = await this.readHistory(projectPath);
+      const result = await change(history);
+      await writeJson(path.join(projectPath, HISTORY_FILE), history);
+      return result;
+    });
+    this.historyLocks.set(key, run);
+    try {
+      return await run;
+    } finally {
+      if (this.historyLocks.get(key) === run) this.historyLocks.delete(key);
+    }
   }
 
   async addHistoryEntry(projectPath: string, entry: GenerationHistory): Promise<void> {
-    const history = await this.readHistory(projectPath);
-    history.push(entry);
-    await writeJson(path.join(projectPath, HISTORY_FILE), history);
+    await this.updateHistory(projectPath, (history) => {
+      history.push(entry);
+    });
   }
 
   // ---------- manifest ----------

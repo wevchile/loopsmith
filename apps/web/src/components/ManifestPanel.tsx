@@ -47,8 +47,7 @@ export function ManifestPanel({ project, onProjectChange }: Props) {
     });
 
   return (
-    <section className="panel">
-      <h3>{t('manifest')}</h3>
+    <div className="settings-section">
       {project.manifestPath ? (
         <p className="small">
           {t('linkedTo')}: <span className="path">{project.manifestPath}</span>
@@ -117,6 +116,6 @@ export function ManifestPanel({ project, onProjectChange }: Props) {
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

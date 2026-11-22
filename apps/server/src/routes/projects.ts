@@ -90,8 +90,24 @@ export const projectsRoutes: FastifyPluginAsync<{ storage: Storage }> = async (f
   fastify.get<{ Params: { id: string } }>('/projects/:id/tracks', async (request) => {
     const project = await storage.getProject(request.params.id);
     const history = await storage.readHistory(project.path);
-    const generated = new Set(history.map((h) => path.resolve(h.outputPath).toLowerCase()));
-    const local = await storage.listLocalTracks(project, generated);
+    const byPath = new Map(history.map((h) => [path.resolve(h.outputPath).toLowerCase(), h]));
+    const local = (await storage.listLocalTracks(project, new Set(byPath.keys()))).map((track) => {
+      const h = byPath.get(path.resolve(track.path).toLowerCase());
+      if (!h) return track;
+      return {
+        ...track,
+        generationId: h.id,
+        generation: {
+          status: h.status ?? 'candidate',
+          originalTrackId: h.originalTrackId,
+          notes: h.notes,
+          tags: h.tags,
+          prompt: h.prompt,
+          model: h.model,
+          timestamp: h.timestamp,
+        },
+      };
+    });
     const manifest = await listManifestTracks(storage, project);
     return { tracks: [...local, ...manifest] };
   });

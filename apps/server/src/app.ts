@@ -6,6 +6,7 @@ import { projectsRoutes } from './routes/projects.js';
 import { generateRoutes, API_KEY_MISSING_MESSAGE } from './routes/generate.js';
 import { manifestRoutes } from './routes/manifest.js';
 import { audioRoutes } from './routes/audio.js';
+import { aiTrackRoutes } from './routes/ai-tracks.js';
 import { AudioTools } from './audio-length.js';
 
 export interface AppOptions {
@@ -121,6 +122,7 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
     trim: { enabled: config.trimToDuration, keepUntrimmed: config.keepUntrimmed, fadeOutSeconds: config.fadeOutSeconds },
   });
   await app.register(manifestRoutes, { prefix: '/api', storage });
+  await app.register(aiTrackRoutes, { prefix: '/api', storage });
   await app.register(audioRoutes, { prefix: '/api', storage });
 
   return app;

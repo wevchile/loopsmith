@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { useTranslation } from 'react-i18next';
+import { Pause, Play, Repeat, Square, Volume2 } from 'lucide-react';
+
+/** Window events: the library toggles the open player; the player reports play/pause. */
+export const TOGGLE_PLAY_EVENT = 'loopsmith:toggle-play';
+export const PLAY_STATE_EVENT = 'loopsmith:play-state';
 
 interface AudioPlayerProps {
   url: string;
@@ -34,10 +39,10 @@ export function AudioPlayer({ url, autoPlay = false }: AudioPlayerProps) {
     const ws = WaveSurfer.create({
       container: containerRef.current,
       url,
-      waveColor: '#8fb8e8',
-      progressColor: '#1e73be',
-      cursorColor: '#333',
-      height: 64,
+      waveColor: '#3b4a63',
+      progressColor: '#7c9cff',
+      cursorColor: '#e8ecf4',
+      height: 56,
       barWidth: 2,
       barGap: 1,
       normalize: true,
@@ -50,18 +55,26 @@ export function AudioPlayer({ url, autoPlay = false }: AudioPlayerProps) {
     });
     ws.on('error', (e) => setError(e instanceof Error ? e.message : String(e)));
     ws.on('timeupdate', (cur) => setTime(cur));
-    ws.on('play', () => setIsPlaying(true));
-    ws.on('pause', () => setIsPlaying(false));
+    const report = (playing: boolean) => {
+      setIsPlaying(playing);
+      window.dispatchEvent(new CustomEvent(PLAY_STATE_EVENT, { detail: playing }));
+    };
+    ws.on('play', () => report(true));
+    ws.on('pause', () => report(false));
+    const onToggle = () => void ws.playPause();
+    window.addEventListener(TOGGLE_PLAY_EVENT, onToggle);
     ws.on('finish', () => {
       if (loopRef.current) {
         ws.setTime(0);
         void ws.play();
       } else {
-        setIsPlaying(false);
+        report(false);
       }
     });
     wsRef.current = ws;
     return () => {
+      window.removeEventListener(TOGGLE_PLAY_EVENT, onToggle);
+      window.dispatchEvent(new CustomEvent(PLAY_STATE_EVENT, { detail: false }));
       ws.destroy();
       wsRef.current = null;
     };
@@ -86,29 +99,19 @@ export function AudioPlayer({ url, autoPlay = false }: AudioPlayerProps) {
       <div ref={containerRef} className="waveform" />
       {error && <div className="error-text">{error}</div>}
       <div className="player-controls">
-        <button onClick={() => wsRef.current?.playPause()} disabled={!ready}>
-          {isPlaying ? t('pause') : t('play')}
+        <button className="icon-btn" onClick={() => wsRef.current?.playPause()} disabled={!ready} title={isPlaying ? t('pause') : t('play')}>
+          {isPlaying ? <Pause size={15} /> : <Play size={15} />}
         </button>
-        <button className="secondary" onClick={stop} disabled={!ready}>
-          {t('stop')}
+        <button className="icon-btn" onClick={stop} disabled={!ready} title={t('stop')}>
+          <Square size={13} />
         </button>
-        <span className="time">
-          {ready ? `${formatTime(time)} / ${formatTime(duration)}` : t('loading')}
-        </span>
-        <label className="inline">
-          <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
-          {t('loop')}
-        </label>
-        <label className="inline">
-          {t('volume')}
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            value={volume}
-            onChange={(e) => setVolume(parseFloat(e.target.value))}
-          />
+        <span className="time">{ready ? `${formatTime(time)} / ${formatTime(duration)}` : t('loading')}</span>
+        <button className={`icon-btn ${loop ? 'active' : ''}`} aria-pressed={loop} onClick={() => setLoop((l) => !l)} title={t('loop')}>
+          <Repeat size={14} />
+        </button>
+        <label className="volume" title={t('volume')}>
+          <Volume2 size={14} />
+          <input type="range" min="0" max="1" step="0.01" value={volume} onChange={(e) => setVolume(parseFloat(e.target.value))} aria-label={t('volume')} />
         </label>
       </div>
     </div>

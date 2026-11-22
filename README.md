@@ -7,7 +7,10 @@ The interface is in Spanish by default and can be switched to English.
 ## Features
 
 - **Projects per game**: each game is a folder on your disk with its own settings, sounds and history.
-- **Folders CRUD**: create, rename and delete folders and subfolders. New projects start with one folder per sound type: `SOUNDTRACK`, `SFX`, `VO`, `AMBIENCE`, `OTHER`.
+- **Dark, editor-style UI**: a two-column workspace (sound library on the left, a collapsible inspector with Generate / Track / History tabs on the right), Spanish by default with an English switch.
+- **Folders CRUD**: create, rename and delete folders and subfolders from the library folder bar or the settings modal. New projects start with one folder per sound type: `SOUNDTRACK`, `SFX`, `VO`, `AMBIENCE`, `OTHER`.
+- **Originals vs AI tracks**: sounds from the game manifest carry an "Original" badge and are read-only. AI tracks carry an "IA / AI" badge and a status: Candidata (default), Elegida or Descartada. AI tracks can be linked to an original (automatic when you generate with an original as the base) and are grouped under it. Only one AI track per original can be Elegida.
+- **AI track actions**: rename (the file on disk too), move to another folder, duplicate, delete (with confirmation), notes and tags. Any track, original or AI, can be downloaded.
 - **Project context (optional)**: a text such as "everything in retro 8-bit style" that is added to every prompt of the project.
 - **Generate music from a prompt** with Lyria. Files are saved locally in the folder you choose.
 - **Instrumental by default**: a switch allows vocals per generation, and each project has its own default.
@@ -113,11 +116,12 @@ Everything except generation works without `GEMINI_API_KEY`: projects, folders, 
 ## Using Loopsmith
 
 1. **Create a project** with "Nuevo proyecto / New project". Give it a name and, optionally, a context such as `retro 8-bit, chiptune, fast tempo`. A folder is created in your first root with the five type folders.
-2. **Organize folders** in the "Carpetas / Folders" panel: hover a folder to add a subfolder (+), rename it or delete it.
+2. **Organize folders** with the folder bar above the library (new subfolder, rename, delete) or in Settings (gear icon) > Carpetas / Folders.
 3. **Generate**: write a prompt, keep "Allow vocals" off for instrumental music (default) or switch it on, choose where to save it and press Generate. The file appears in the sounds list and in the history.
-4. **Listen**: click a sound to open the player (play, pause, stop, loop, volume).
-5. **Create a variant**: click "Use as base" on a sound (or switch on "Use the selected track as the base"), describe the changes ("faster and darker") and generate. A new file is created next to the others.
-6. **Link your game** (optional): see the next section.
+4. **Listen**: click a sound to open the player (play, pause, stop, loop, volume). Keyboard: arrow keys move the selection, Space plays or pauses, Escape deselects, `i` shows or hides the inspector and `,` opens Settings.
+5. **Review AI tracks**: mark each one as Candidata, Elegida or Descartada with the row icons or in the Track tab, link it to an original, add notes and tags, and filter the library by status. The "..." menu has rename, move, duplicate, link and delete.
+6. **Create a variant**: click "Use as base" on a sound (or switch on "Use the selected track as the base"), describe the changes ("faster and darker") and generate. A new file is created next to the others.
+7. **Link your game** (optional): open Settings > Manifiesto del juego / Game manifest, see the next section.
 
 All data is stored as plain files inside each project folder:
 
@@ -125,7 +129,7 @@ All data is stored as plain files inside each project folder:
 loopsmith-data/
   My_Game/
     loopsmith.project.json   project settings (name, context, vocals default, linked manifest)
-    history.json             generation history
+    history.json             generation history and AI track metadata (status, linked original, notes, tags)
     manifest.snapshot.json   last applied manifest (only when a manifest is linked)
     SOUNDTRACK/ SFX/ VO/ AMBIENCE/ OTHER/   your audio files and subfolders
 ```

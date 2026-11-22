@@ -1,6 +1,9 @@
 export type SoundType = 'SOUNDTRACK' | 'SFX' | 'VO' | 'AMBIENCE' | 'OTHER';
 export const SOUND_TYPES: SoundType[] = ['SOUNDTRACK', 'SFX', 'VO', 'AMBIENCE', 'OTHER'];
 
+export type TrackStatus = 'candidate' | 'chosen' | 'discarded';
+export const TRACK_STATUSES: TrackStatus[] = ['candidate', 'chosen', 'discarded'];
+
 export interface Project {
   id: string;
   name: string;
@@ -22,6 +25,16 @@ export interface AudioTrack {
   source: 'local' | 'manifest';
   duration?: number;
   isGenerated: boolean;
+  generationId?: string;
+  generation?: {
+    status: TrackStatus;
+    originalTrackId?: string;
+    notes?: string;
+    tags?: string[];
+    prompt: string;
+    model: string;
+    timestamp: string;
+  };
   exists?: boolean;
   loopMarkers?: { start: number; end: number };
 }
@@ -52,6 +65,10 @@ export interface GenerationHistory {
   timestamp: string;
   outputPath: string;
   outputTrackId?: string;
+  status?: TrackStatus;
+  originalTrackId?: string;
+  notes?: string;
+  tags?: string[];
 }
 
 export interface FolderNode {
@@ -147,6 +164,20 @@ export const api = {
   tracks: (id: string) => request<{ tracks: AudioTrack[] }>(`/api/projects/${enc(id)}/tracks`).then((d) => d.tracks),
   history: (id: string) =>
     request<{ history: GenerationHistory[] }>(`/api/projects/${enc(id)}/history`).then((d) => d.history),
+  downloadUrl: (projectId: string, trackId: string) => `/api/projects/${enc(projectId)}/download?trackId=${enc(trackId)}`,
+  updateGeneration: (
+    projectId: string,
+    genId: string,
+    body: { status?: TrackStatus; originalTrackId?: string | null; notes?: string; tags?: string[] }
+  ) => request<{ entry: GenerationHistory; demoted: string[] }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}`, { method: 'PATCH', json: body }),
+  renameGeneration: (projectId: string, genId: string, name: string) =>
+    request<{ entry: GenerationHistory }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}/rename`, { method: 'POST', json: { name } }),
+  moveGeneration: (projectId: string, genId: string, folder: string) =>
+    request<{ entry: GenerationHistory }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}/move`, { method: 'POST', json: { folder } }),
+  duplicateGeneration: (projectId: string, genId: string) =>
+    request<{ entry: GenerationHistory }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}/duplicate`, { method: 'POST' }),
+  deleteGeneration: (projectId: string, genId: string) =>
+    request(`/api/projects/${enc(projectId)}/generations/${enc(genId)}`, { method: 'DELETE' }),
   audioUrl: (projectId: string, trackId: string) => `/api/projects/${enc(projectId)}/audio?trackId=${enc(trackId)}`,
 
   folders: (id: string) => request<{ tree: FolderNode }>(`/api/projects/${enc(id)}/folders`).then((d) => d.tree),

@@ -1,70 +1,43 @@
 import { useTranslation } from 'react-i18next';
-import { ApiError, api, type FolderNode } from '../api';
+import { Folder, FolderPen, FolderPlus, FolderX } from 'lucide-react';
+import type { FolderNode } from '../api';
+import type { LibraryActions } from '../actions';
 
 interface Props {
-  projectId: string;
   tree: FolderNode | null;
   selectedFolder: string;
   onSelect: (path: string) => void;
-  onChanged: () => Promise<void>;
-  onError: (message: string) => void;
+  actions: LibraryActions;
 }
 
-export function FolderTree({ projectId, tree, selectedFolder, onSelect, onChanged, onError }: Props) {
+/** Full folder tree with create, rename and delete (settings modal, "Folders" tab). */
+export function FolderTree({ tree, selectedFolder, onSelect, actions }: Props) {
   const { t } = useTranslation();
-
-  const run = async (action: () => Promise<unknown>) => {
-    try {
-      await action();
-      await onChanged();
-    } catch (e) {
-      onError((e as Error).message);
-    }
-  };
-
-  const createIn = (parent: string) => {
-    const name = window.prompt(t('folderNamePrompt'));
-    if (name?.trim()) void run(() => api.createFolder(projectId, parent, name.trim()));
-  };
-
-  const renameFolder = (node: FolderNode) => {
-    const newName = window.prompt(t('renamePrompt'), node.name);
-    if (newName?.trim() && newName !== node.name) void run(() => api.renameFolder(projectId, node.path, newName.trim()));
-  };
-
-  const deleteFolder = (node: FolderNode) => {
-    if (!window.confirm(t('deleteFolderConfirm', { path: node.path }))) return;
-    void run(async () => {
-      try {
-        await api.deleteFolder(projectId, node.path, false);
-      } catch (e) {
-        if (e instanceof ApiError && e.code === 'FOLDER_NOT_EMPTY' && window.confirm(t('deleteFolderNotEmpty', { path: node.path }))) {
-          await api.deleteFolder(projectId, node.path, true);
-        } else {
-          throw e;
-        }
-      }
-      if (selectedFolder === node.path || selectedFolder.startsWith(`${node.path}/`)) onSelect('');
-    });
-  };
 
   const renderNode = (node: FolderNode, depth: number) => (
     <li key={node.path || '__root'}>
-      <div className={`folder-row ${selectedFolder === node.path ? 'selected' : ''}`} style={{ paddingLeft: depth * 14 }}>
-        <span className="folder-name" onClick={() => onSelect(node.path)} title={node.path || t('projectRoot')}>
+      <div className={`folder-row ${selectedFolder === node.path ? 'selected' : ''}`} style={{ paddingLeft: 8 + depth * 16 }}>
+        <button className="folder-name" onClick={() => onSelect(node.path)} title={node.path || t('projectRoot')}>
+          <Folder size={14} />
           {depth === 0 ? t('projectRoot') : node.name}
-        </span>
+        </button>
         <span className="folder-actions">
-          <button className="icon" title={t('newFolder')} onClick={() => createIn(node.path)}>
-            +
+          <button className="icon-btn" title={t('newSubfolder', { folder: node.path || t('projectRoot') })} onClick={() => void actions.newFolder(node.path)}>
+            <FolderPlus size={14} />
           </button>
           {depth > 0 && (
             <>
-              <button className="icon" title={t('rename')} onClick={() => renameFolder(node)}>
-                ✎
+              <button className="icon-btn" title={t('renameFolder')} onClick={() => void actions.renameFolder(node.path)}>
+                <FolderPen size={14} />
               </button>
-              <button className="icon danger" title={t('delete')} onClick={() => deleteFolder(node)}>
-                ×
+              <button
+                className="icon-btn danger"
+                title={t('deleteFolder')}
+                onClick={async () => {
+                  if ((await actions.deleteFolder(node.path)) && (selectedFolder === node.path || selectedFolder.startsWith(`${node.path}/`))) onSelect('');
+                }}
+              >
+                <FolderX size={14} />
               </button>
             </>
           )}
@@ -75,9 +48,9 @@ export function FolderTree({ projectId, tree, selectedFolder, onSelect, onChange
   );
 
   return (
-    <section className="panel">
-      <h3>{t('folders')}</h3>
+    <div className="settings-section">
+      <p className="muted small">{t('foldersHelp')}</p>
       {tree && <ul className="folder-tree">{renderNode(tree, 0)}</ul>}
-    </section>
+    </div>
   );
 }

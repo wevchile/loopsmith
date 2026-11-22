@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { GenerationHistory } from '../api';
+import { StatusBadge } from './StatusBadge';
 
 interface Props {
   history: GenerationHistory[];
@@ -9,8 +10,7 @@ interface Props {
 export function HistoryPanel({ history, onSelectTrack }: Props) {
   const { t, i18n } = useTranslation();
   return (
-    <section className="panel">
-      <h3>{t('history')}</h3>
+    <div className="inspector-section">
       {history.length === 0 && <p className="muted">{t('noHistory')}</p>}
       <ul className="history">
         {history.map((h) => (
@@ -19,6 +19,7 @@ export function HistoryPanel({ history, onSelectTrack }: Props) {
               {new Date(h.timestamp).toLocaleString(i18n.resolvedLanguage)} · {h.model} ·{' '}
               {h.vocalsEnabled ? t('withVocals') : t('instrumental')}
             </div>
+            {h.status && <StatusBadge status={h.status} />}
             <div>{h.prompt}</div>
             {h.referenceTrackId && (
               <div className="small muted">
@@ -49,6 +50,6 @@ export function HistoryPanel({ history, onSelectTrack }: Props) {
           </li>
         ))}
       </ul>
-    </section>
+    </div>
   );
 }

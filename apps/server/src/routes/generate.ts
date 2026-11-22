@@ -205,6 +205,16 @@ export const generateRoutes: FastifyPluginAsync<GenerateRoutesOptions> = async (
       outputPath = path.join(outputDir, `${baseName}_${stamp}_${i}.${result.format}`);
     }
     await storage.writeAudioFile(outputPath, result.audioData);
+    // A track generated from an original (manifest) sound competes to replace it. A variant of an
+    // AI track that is already linked to an original inherits that link.
+    let originalTrackId: string | undefined;
+    if (body.referenceTrackId?.startsWith('manifest:')) {
+      originalTrackId = body.referenceTrackId;
+    } else if (body.referenceTrackId) {
+      const base = (await storage.readHistory(project.path)).find((h) => h.outputTrackId === body.referenceTrackId);
+      originalTrackId = base?.originalTrackId;
+    }
+
     const audio = await enforceDuration(storage, project.path, outputPath, duration, audioTools, trim);
     if (audio.note) request.log.warn(audio.note);
 
@@ -228,6 +238,8 @@ export const generateRoutes: FastifyPluginAsync<GenerateRoutesOptions> = async (
       timestamp: new Date().toISOString(),
       outputPath,
       outputTrackId: `local:${toPosix(path.relative(project.path, outputPath))}`,
+      status: 'candidate',
+      originalTrackId,
     };
     await storage.addHistoryEntry(project.path, entry);
 

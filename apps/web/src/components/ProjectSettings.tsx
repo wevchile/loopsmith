@@ -25,8 +25,7 @@ export function ProjectSettings({ project, onSave, onRemove }: Props) {
   const dirty = name !== project.name || context !== (project.context ?? '') || vocals !== project.defaultVocalsEnabled;
 
   return (
-    <section className="panel">
-      <h3>{t('settings')}</h3>
+    <div className="settings-section">
       <p className="muted path">{project.path}</p>
       <label>
         {t('projectName')}
@@ -61,6 +60,6 @@ export function ProjectSettings({ project, onSave, onRemove }: Props) {
         </button>
       </div>
       {status && <small className="ok-text">{status}</small>}
-    </section>
+    </div>
   );
 }

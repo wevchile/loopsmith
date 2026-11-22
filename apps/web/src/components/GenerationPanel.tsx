@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Sparkles } from 'lucide-react';
 import type { AudioTrack, Health, Project } from '../api';
 
 export interface GenerateInput {
@@ -76,8 +77,7 @@ export function GenerationPanel({
   };
 
   return (
-    <section className="panel">
-      <h3>{t('generate')}</h3>
+    <div className="inspector-section">
       {health?.generation.model && (
         <p className="muted small">
           {t('model')}: {health.generation.model}
@@ -149,10 +149,10 @@ export function GenerationPanel({
         </p>
       )}
 
-      <button className="full" onClick={() => void submit()} disabled={!available || busy || !prompt.trim() || Boolean(useReference && !referenceReady)}>
-        {busy ? t('generating') : t('generate')}
+      <button className="btn primary full" onClick={() => void submit()} disabled={!available || busy || !prompt.trim() || Boolean(useReference && !referenceReady)}>
+        <Sparkles size={15} /> {busy ? t('generating') : t('generate')}
       </button>
       {result && <p className={result.ok ? 'ok-text' : 'error-text'}>{result.text}</p>}
-    </section>
+    </div>
   );
 }

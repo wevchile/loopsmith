@@ -32,6 +32,10 @@ export interface GeneratedAudioInfo {
   note?: string;
 }
 
+/** Review status of an AI track. Candidates compete to replace an original (manifest) sound. */
+export type TrackStatus = 'candidate' | 'chosen' | 'discarded';
+export const TRACK_STATUSES: readonly TrackStatus[] = ['candidate', 'chosen', 'discarded'];
+
 export interface PromptRefinementInfo {
   /** refined = the model wrote the prompt; skipped = turned off; failed = error, raw prompt used. */
   status: 'refined' | 'skipped' | 'failed';
@@ -68,6 +72,15 @@ export interface GenerationHistory {
   outputPath: string;
   /** Track id (relative to the project folder) of the generated file. */
   outputTrackId?: string;
+  /** Review status. Entries written before statuses existed are read as "candidate". */
+  status?: TrackStatus;
+  /** Original (manifest) track this AI track competes to replace, for example "manifest:boss_theme". */
+  originalTrackId?: string;
+  notes?: string;
+  tags?: string[];
+  /** Id of the generation this entry was duplicated from. */
+  duplicatedFrom?: string;
+  updatedAt?: string;
 }
 
 export type TrackSource = 'local' | 'manifest';
@@ -85,6 +98,16 @@ export interface AudioTrack {
   duration?: number;
   isGenerated: boolean;
   generationId?: string;
+  /** Review data of an AI track (only when isGenerated). */
+  generation?: {
+    status: TrackStatus;
+    originalTrackId?: string;
+    notes?: string;
+    tags?: string[];
+    prompt: string;
+    model: string;
+    timestamp: string;
+  };
   hash?: string;
   loopMarkers?: { start: number; end: number };
   /** False when the file referenced by a manifest entry does not exist on disk. */
