@@ -1,189 +1,141 @@
 # loopsmith
 
-Loopsmith is a local web application that helps you create and edit video game music and sound with AI. It runs entirely on your PC (localhost) and uses Google's Lyria 3.5 AI model via the Gemini API to generate high-quality audio.
+Loopsmith is a free, open source (MIT) web app that runs on your own computer and helps you create and edit music and sound for video games with AI. The first AI provider is Google Lyria through the Gemini API, and the code is organized so more music AIs can be added later.
+
+The interface is in Spanish by default and can be switched to English.
 
 ## Features
 
-- **Multiple projects**: Organize audio by game/project with configurable context
-- **AI music generation**: Generate music from text prompts using Google Lyria 3.5
-- **Instrumental/vocal control**: Toggle vocals on/off per generation or project default
-- **Reference-based variants**: Analyze existing audio and create AI-guided variants
-- **Audio player**: Play, pause, seek, loop, adjust volume, with waveform visualization
-- **Manifest linking**: Link external game audio manifests for read-only browsing
-- **Generation history**: Track all generations with prompts, params, and timestamps
-- **Internationalization**: Spanish (default) and English UI with language switcher
-- **Path safety**: Server-side validation prevents path traversal attacks
+- **Projects per game**: each game is a folder on your disk with its own settings, sounds and history.
+- **Folders CRUD**: create, rename and delete folders and subfolders. New projects start with one folder per sound type: `SOUNDTRACK`, `SFX`, `VO`, `AMBIENCE`, `OTHER`.
+- **Project context (optional)**: a text such as "everything in retro 8-bit style" that is added to every prompt of the project.
+- **Generate music from a prompt** with Lyria. Files are saved locally in the folder you choose.
+- **Instrumental by default**: a switch allows vocals per generation, and each project has its own default.
+- **Variants from a base track**: switch on "use the selected track as the base", Gemini listens to it and describes it, and Lyria creates a new variant with your changes. The original file is never modified.
+- **Player**: play, pause, stop, loop, volume and waveform.
+- **History**: every generation is recorded with its prompt, final prompt, model, vocals setting and output file.
+- **Game manifest**: link a `loopsmith-manifest.json` generated in your game repository to browse and play the game's existing sounds, grouped by type. When the game changes, Loopsmith shows what was added, removed, renamed, moved or updated before applying it.
+- **Local and safe**: the server only listens on `127.0.0.1` and only reads and writes inside your configured folders (and, for a linked manifest, inside the manifest's folder).
 
 ## Requirements
 
-- **Node.js**: 20.0.0 or higher
-- **pnpm**: 9.0.0 or higher
-- **Google Gemini API key**: Get one at https://aistudio.google.com/api-keys
+- **Node.js 22 or newer** (tested with Node 24): https://nodejs.org/
+- **pnpm 10 or newer** (tested with pnpm 12.18): https://pnpm.io/installation
+- **Git** to clone the repository.
+- **A Gemini API key** for AI generation: https://aistudio.google.com/api-keys (optional to try the app; see "Running without an API key").
 
 ## Installation
 
-### Windows
+### Windows (PowerShell)
 
-1. Install Node.js from https://nodejs.org/ (download the LTS version)
-2. Install pnpm:
-   ```bash
-   npm install -g pnpm
-   ```
-3. Clone or download this repository
-4. Open a terminal (Command Prompt or PowerShell) in the loopsmith folder
-5. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-6. Copy `.env.example` to `.env`:
-   ```bash
-   copy .env.example .env
-   ```
-7. Edit `.env` and add your Gemini API key
+```powershell
+# 1. Install pnpm if you do not have it (or follow https://pnpm.io/installation)
+npm install -g pnpm
 
-### macOS
+# 2. Clone the repository
+cd C:\github
+git clone https://github.com/wevchile/loopsmith.git
+cd loopsmith
 
-1. Install Node.js from https://nodejs.org/ or use Homebrew:
-   ```bash
-   brew install node
-   ```
-2. Install pnpm:
-   ```bash
-   npm install -g pnpm
-   ```
-3. Clone or download this repository
-4. Open Terminal in the loopsmith folder
-5. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-6. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-7. Edit `.env` and add your Gemini API key
+# 3. Install dependencies
+pnpm install
 
-### Linux
-
-1. Install Node.js (use your distribution's package manager or download from https://nodejs.org/)
-   ```bash
-   # Ubuntu/Debian
-   sudo apt update
-   sudo apt install nodejs npm
-   
-   # Fedora
-   sudo dnf install nodejs npm
-   ```
-2. Install pnpm:
-   ```bash
-   npm install -g pnpm
-   ```
-3. Clone or download this repository
-4. Open a terminal in the loopsmith folder
-5. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-6. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-7. Edit `.env` and add your Gemini API key
-
-## Configuration
-
-### Getting a Gemini API Key
-
-1. Go to https://aistudio.google.com/api-keys
-2. Sign in with your Google account
-3. Click "Create API Key"
-4. Copy the key and paste it into your `.env` file:
-   ```
-   GEMINI_API_KEY=your_actual_api_key_here
-   ```
-
-### Storage Roots
-
-By default, Loopsmith stores projects in `./loopsmith-data` inside the repo. You can configure additional storage roots in `.env`:
-
-```
-LOOPSMITH_ROOTS=./loopsmith-data,/path/to/another/folder
+# 4. Create your .env from the example and edit it
+Copy-Item .env.example .env
+notepad .env
 ```
 
-Separate multiple paths with commas. Use absolute paths or paths relative to the repo root.
+### macOS / Linux
 
-## Running Loopsmith
+```bash
+npm install -g pnpm
+git clone https://github.com/wevchile/loopsmith.git
+cd loopsmith
+pnpm install
+cp .env.example .env
+# edit .env with your editor
+```
 
-Start both the web app and server with a single command:
+### About `pnpm install` and install scripts
+
+Recent pnpm versions block dependency install scripts unless they are approved. The approvals are already in `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  esbuild: true      # needed by Vite and tsx
+  protobufjs: false  # optional version check, not needed
+```
+
+So `pnpm install` works without running `pnpm approve-builds`. The lockfile is also compatible with pnpm's `minimumReleaseAge` supply chain policy. If pnpm warns that the `pnpm` field in `package.json` is ignored, you are on an old checkout: pull the latest version.
+
+## Configuration (`.env`)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GEMINI_API_KEY` | (empty) | Your key from https://aistudio.google.com/api-keys. Required only for generation. |
+| `LYRIA_MODEL` | `lyria-3.5` | Lyria model. `lyria-3-clip-preview` makes 30 second clips. |
+| `LYRIA_OUTPUT_FORMAT` | `mp3` | `mp3` or `wav`. |
+| `GEMINI_ANALYSIS_MODEL` | `gemini-3.6-flash` | Model that describes a base track for variants. |
+| `LOOPSMITH_ROOTS` | `./loopsmith-data` | Comma separated folders where projects live. Relative paths start at the repository folder. |
+| `LOOPSMITH_SERVER_PORT` | `3001` | API port (always bound to 127.0.0.1). |
+| `LOOPSMITH_WEB_PORT` | `3000` | Web app port. |
+| `LOOPSMITH_OPEN_BROWSER` | `true` | Open the browser when running `pnpm dev`. |
+
+Restart `pnpm dev` after changing `.env`.
+
+## Running
 
 ```bash
 pnpm dev
 ```
 
-This will:
-- Start the server on http://127.0.0.1:3001
-- Start the web app on http://localhost:3000
-- Open your browser automatically
+This builds the shared packages and starts:
 
-The app is now running locally on your PC.
+- the web app at http://127.0.0.1:3000 (opens in your browser)
+- the API at http://127.0.0.1:3001 (health check: http://127.0.0.1:3001/api/health)
 
-## Usage Walkthrough
+Stop it with `Ctrl+C`.
 
-### 1. Create a Project
+### Running without an API key
 
-- Click "Create Project" in the left sidebar
-- Enter a project name (e.g., "My Game")
-- Optionally add a context (e.g., "retro 8-bit style") that will be prepended to all prompts
-- Choose whether to enable vocals by default
-- Click "Create"
+Everything except generation works without `GEMINI_API_KEY`: projects, folders, context, the player and manifests. The app shows a yellow banner explaining how to add the key, and the Generate button stays disabled. The API answers generation requests with HTTP 503 and the code `API_KEY_MISSING`.
 
-### 2. Generate Audio
+## Using Loopsmith
 
-- Select your project from the sidebar
-- In the right panel, enter a prompt describing the music you want:
-  - "An upbeat chiptune battle theme in C major"
-  - "A calm ambient forest soundscape with birds"
-  - "Epic orchestral boss fight music with heavy drums"
-- Choose whether to enable vocals (if supported by the provider)
-- Optionally set a duration in seconds
-- Select an output folder (SOUNDTRACK, SFX, VO, AMBIENCE, or OTHER)
-- Click "Generate"
+1. **Create a project** with "Nuevo proyecto / New project". Give it a name and, optionally, a context such as `retro 8-bit, chiptune, fast tempo`. A folder is created in your first root with the five type folders.
+2. **Organize folders** in the "Carpetas / Folders" panel: hover a folder to add a subfolder (+), rename it or delete it.
+3. **Generate**: write a prompt, keep "Allow vocals" off for instrumental music (default) or switch it on, choose where to save it and press Generate. The file appears in the sounds list and in the history.
+4. **Listen**: click a sound to open the player (play, pause, stop, loop, volume).
+5. **Create a variant**: click "Use as base" on a sound (or switch on "Use the selected track as the base"), describe the changes ("faster and darker") and generate. A new file is created next to the others.
+6. **Link your game** (optional): see the next section.
 
-### 3. Play Audio
+All data is stored as plain files inside each project folder:
 
-- Generated tracks appear in the center panel, grouped by type
-- Click a track to expand it and show the audio player
-- Use the player controls to play, pause, loop, and adjust volume
-- The waveform visualization shows the audio structure
+```
+loopsmith-data/
+  My_Game/
+    loopsmith.project.json   project settings (name, context, vocals default, linked manifest)
+    history.json             generation history
+    manifest.snapshot.json   last applied manifest (only when a manifest is linked)
+    SOUNDTRACK/ SFX/ VO/ AMBIENCE/ OTHER/   your audio files and subfolders
+```
 
-### 4. Create Variants (Reference-Based Generation)
+## Linking a game with a manifest
 
-Since Lyria doesn't support direct reference audio, Loopsmith implements a "guided variant" workflow:
+A manifest is a JSON file that lists the sounds of a game repository: their name, type, folder and path. Loopsmith uses it to show and play the game's sounds without copying them.
 
-- Click "Use as reference" on any track
-- The track is analyzed by Gemini to describe its characteristics (genre, instruments, mood, BPM, key)
-- Enter your variation prompt (e.g., "make it faster and more aggressive")
-- The AI generates a new track based on the description + your prompt
-- The result is saved as a new file, not an edit of the original
+1. Open your game repository with an AI coding assistant and paste the prompt from [`docs/MANIFEST_GENERATOR_PROMPT.md`](docs/MANIFEST_GENERATOR_PROMPT.md). It creates `loopsmith-manifest.json` at the root of the game repository.
+2. In Loopsmith, open your project, paste the absolute path of that file in "Manifiesto del juego / Game manifest" (for example `C:\games\my-game\loopsmith-manifest.json`) and press "Review changes".
+3. Check the summary and press "Link". The game's sounds appear in the list, marked as `manifest`.
+4. When the game changes, regenerate the manifest in the game repository and press "Check for changes" in Loopsmith. You will see what was added, removed, renamed, moved or updated, and nothing changes until you press "Apply". Your generated files are never touched.
 
-### 5. View History
+Rules:
 
-- Access your project's generation history via the API endpoint `/api/projects/:id/history`
-- Each entry includes the original prompt, composed prompt, model, parameters, and output path
+- `relativePath` is relative to the folder that contains the manifest. Entries that point outside that folder are rejected.
+- Matching between versions uses `id` first and then `hash`, so keep ids stable and include a content hash to detect renames and moves.
+- The JSON Schema is in [`schemas/manifest.schema.json`](schemas/manifest.schema.json).
 
-### 6. Link a Game Manifest (Optional)
-
-If you have an external game repository with audio files:
-
-1. Create a manifest JSON file in your game repo (see "Manifest Format" below)
-2. Use the manifest linking API to preview and apply it:
-   - Preview: `POST /api/manifest/preview` with `projectId` and `manifestPath`
-   - Link: `POST /api/manifest/link` with `projectId` and `manifestPath`
-3. The manifest's audio files are displayed in Loopsmith (read-only from their original paths)
-
-## Manifest Format
-
-A Loopsmith manifest is a JSON file that describes audio files in an external game repository. Here's an example:
+Example:
 
 ```json
 {
@@ -191,126 +143,69 @@ A Loopsmith manifest is a JSON file that describes audio files in an external ga
   "gameRepo": "my-game",
   "entries": [
     {
-      "id": "bgm_001",
-      "name": "Main Theme",
+      "id": "music-main-theme",
+      "name": "main_theme.ogg",
       "type": "SOUNDTRACK",
       "folder": "music",
-      "relativePath": "assets/audio/music/main_theme.mp3",
-      "hash": "sha256:abc123...",
+      "relativePath": "assets/audio/music/main_theme.ogg",
+      "hash": "sha256:9f2c...",
       "duration": 120.5,
-      "loopMarkers": {
-        "start": 10.0,
-        "end": 110.0
-      }
+      "loopMarkers": { "start": 10.0, "end": 110.0 }
     },
     {
-      "id": "sfx_button_01",
-      "name": "Button Click",
+      "id": "sfx-ui-click",
+      "name": "click.wav",
       "type": "SFX",
       "folder": "ui",
-      "relativePath": "assets/audio/sfx/ui/button_click.wav",
-      "hash": "sha256:def456...",
-      "duration": 0.3
+      "relativePath": "assets/audio/sfx/ui/click.wav",
+      "hash": "sha256:41ab..."
     }
   ]
 }
 ```
 
-The manifest schema is published at `schemas/manifest.schema.json` and can be used to validate your manifest files.
+## About Lyria
 
-### Generating a Manifest
+Loopsmith uses the official [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK and the Gemini Interactions API, as described in the [Lyria music generation guide](https://ai.google.dev/gemini-api/docs/music-generation).
 
-See `docs/MANIFEST_GENERATOR_PROMPT.md` for a ready-to-paste prompt you can give to an AI coding assistant in your game repo to automatically generate a valid manifest.
+- **Default model: `lyria-3.5`**, listed as Google's flagship (stable, no `-preview` suffix) music model in the [models list](https://ai.google.dev/gemini-api/docs/models). It creates full tracks of a couple of minutes at 44.1 kHz.
+- `lyria-3-clip-preview` creates 30 second clips and is useful to iterate quickly; set `LYRIA_MODEL=lyria-3-clip-preview` to use it.
+- **Lyria RealTime is not used**: it streams music live over a WebSocket, while Loopsmith creates and saves complete files. Lyria 3.5 covers that use case with a simpler request.
+- **Instrumental vs vocals**: Lyria has no separate "instrumental" parameter, so when vocals are off Loopsmith adds an explicit "Instrumental only, no vocals" instruction to the prompt, as recommended in the guide.
+- **Variants**: Lyria does not accept an audio file as input, so the "base track" option first asks a Gemini model to describe the track (genre, instruments, mood, tempo, key) and then sends that description plus your changes to Lyria.
+- Lyria only creates music. It works well for `SOUNDTRACK` and reasonably for `AMBIENCE`, not for real sound effects or voice lines. Those types are ready for future providers.
+- Generation is billed by Google per request; check https://ai.google.dev/gemini-api/docs/pricing before generating a lot. All generated audio carries an inaudible SynthID watermark.
 
-## Adding a New AI Provider
+## Adding another AI provider
 
-Loopsmith uses a pluggable provider architecture. To add a new music generation provider:
+1. Create `packages/providers/src/my-provider.ts` implementing `MusicProvider` from `packages/providers/src/provider.ts` (`id`, `name`, `model`, `capabilities`, `generate()` and optionally `analyzeReference()`).
+2. Register it in `ProviderRegistry.createDefault()` in `packages/providers/src/provider-registry.ts` when its configuration is present.
+3. Add its settings to `apps/server/src/config.ts` and `.env.example`.
 
-1. Create a new file in `packages/providers/src/` (e.g., `my-provider.ts`)
-2. Implement the `MusicProvider` interface:
+## Project structure
 
-```typescript
-import type { MusicProvider, ProviderConfig } from './provider.js';
-import type { GenerateRequest, GenerateResult, ProviderCapabilities } from '@loopsmith/core';
-
-export class MyProvider implements MusicProvider {
-  readonly id = 'my-provider';
-  readonly name = 'My Provider';
-  readonly capabilities: ProviderCapabilities = {
-    supportsInstrumental: true,
-    supportsVocals: false,
-    supportsReferenceAudio: true,
-    maxDurationSeconds: 300,
-    outputFormats: ['mp3', 'wav'],
-  };
-
-  constructor(config: ProviderConfig) {
-    // Initialize your provider
-  }
-
-  async generate(request: GenerateRequest): Promise<GenerateResult> {
-    // Implement generation logic
-    // Return { audioData: Buffer, format: string, lyrics?: string, metadata?: object }
-  }
-
-  async analyzeReference?(audioPath: string): Promise<string> {
-    // Optional: implement reference audio analysis
-  }
-}
+```
+apps/web            Vite + React UI (react-i18next, wavesurfer.js)
+apps/server         Fastify API bound to 127.0.0.1 (projects, folders, audio streaming, manifests, generation)
+packages/core       Shared types, manifest schema and sync, sound classifier, path safety
+packages/providers  AI provider interface and the Gemini Lyria provider
+schemas/            JSON Schema of the manifest
+docs/               Prompt to generate a manifest from a game repository
 ```
 
-3. Register your provider in `packages/providers/src/provider-registry.ts`:
+## Development
 
-```typescript
-import { MyProvider } from './my-provider.js';
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Builds shared packages, starts web and API in watch mode |
+| `pnpm build` | Builds every package and the web app |
+| `pnpm typecheck` | TypeScript checks for every package |
+| `pnpm lint` | Same as `typecheck` for now |
+| `pnpm test` | Runs the unit and API tests (Vitest) |
+| `pnpm clean` | Deletes build output (`dist` folders) |
 
-// In createDefault():
-if (config.myProviderApiKey) {
-  const myProvider = new MyProvider(config);
-  registry.registerProvider(myProvider);
-}
-```
-
-4. Add any required config to `apps/server/src/config.ts`
-5. Update `.env.example` with the new config
-
-## Technical Architecture
-
-Loopsmith is a TypeScript pnpm monorepo with the following structure:
-
-- `apps/web`: Vite + React frontend with i18next for internationalization
-- `apps/server`: Node + Fastify backend with path traversal protection
-- `packages/core`: Domain logic, manifest sync, classifier, path safety
-- `packages/providers`: Pluggable AI provider interface + Gemini Lyria implementation
-
-### Why Lyria 3.5?
-
-As of November 2026, Lyria 3.5 (`lyria-3.5`) is Google's stable, generally available music generation model. It supports:
-- Full-length songs (up to 3 minutes)
-- 44.1 kHz stereo audio (MP3/WAV)
-- Text and image inputs
-- Instrumental and vocal generation
-- Fine-grained control via timestamps and structure tags
-
-Lyria RealTime is not included in v0.1 because it's designed for streaming use cases, while Loopsmith generates and saves complete audio files.
-
-## Development Commands
-
-- `pnpm dev` - Start both web and server in development mode
-- `pnpm build` - Build all packages
-- `pnpm test` - Run all tests
-- `pnpm lint` - Type-check all packages
-- `pnpm typecheck` - Run TypeScript type checking
+Build output and TypeScript incremental files (`dist/`, `*.tsbuildinfo`) are never committed.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Limitations
-
-- **Lyria 3.5 cost**: $0.08 per generated song (no free tier)
-- **API key required**: You must provide your own Gemini API key
-- **No multi-turn editing**: Each generation is independent; iterative refinement requires new generations
-- **Safety filters**: Prompts requesting specific artist voices or copyrighted lyrics are blocked
-- **Watermarking**: All generated audio includes an imperceptible SynthID watermark
-- **Windows compatibility**: All paths use Node.js path module for cross-platform compatibility
+[MIT](LICENSE)
