@@ -18,6 +18,8 @@ export interface ProviderConfig {
   lyriaModel?: string;
   /** Gemini model used to describe reference tracks. Defaults to DEFAULT_ANALYSIS_MODEL. */
   analysisModel?: string;
+  /** Gemini API version. Defaults to DEFAULT_API_VERSION ("v1beta"), required by Lyria. */
+  apiVersion?: string;
   /** Output format requested from Lyria. Defaults to "mp3". */
   outputFormat?: 'mp3' | 'wav';
 }

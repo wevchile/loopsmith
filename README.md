@@ -73,6 +73,7 @@ So `pnpm install` works without running `pnpm approve-builds`. The lockfile is a
 | Variable | Default | Description |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | (empty) | Your key from https://aistudio.google.com/api-keys. Required only for generation. |
+| `GEMINI_API_VERSION` | `v1beta` | Gemini API version. Lyria is only served on `v1beta`; keep the default. |
 | `LYRIA_MODEL` | `lyria-3.5` | Lyria model. `lyria-3-clip-preview` makes 30 second clips. |
 | `LYRIA_OUTPUT_FORMAT` | `mp3` | `mp3` or `wav`. |
 | `GEMINI_ANALYSIS_MODEL` | `gemini-3.6-flash` | Model that describes a base track for variants. |
@@ -82,6 +83,8 @@ So `pnpm install` works without running `pnpm approve-builds`. The lockfile is a
 | `LOOPSMITH_OPEN_BROWSER` | `true` | Open the browser when running `pnpm dev`. |
 
 Restart `pnpm dev` after changing `.env`.
+
+Only `GEMINI_API_KEY` is needed to generate. Keys created in AI Studio work in both formats (`AIza...` and `AQ...`). `GOOGLE_CLOUD_PROJECT` and other Vertex AI settings are not used.
 
 ## Running
 
@@ -166,7 +169,9 @@ Example:
 
 ## About Lyria
 
-Loopsmith uses the official [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK and the Gemini Interactions API, as described in the [Lyria music generation guide](https://ai.google.dev/gemini-api/docs/music-generation).
+Loopsmith uses the official [`@google/genai`](https://www.npmjs.com/package/@google/genai) SDK and the Gemini Interactions API (`POST v1beta/interactions`), as described in the [Lyria music generation guide](https://ai.google.dev/gemini-api/docs/music-generation).
+
+- **API version `v1beta` is required.** The SDK defaults to `v1`, where the API answers `404 Model 'lyria-3.5' not found`. Loopsmith creates the client with `apiVersion: 'v1beta'` (configurable with `GEMINI_API_VERSION`).
 
 - **Default model: `lyria-3.5`**, listed as Google's flagship (stable, no `-preview` suffix) music model in the [models list](https://ai.google.dev/gemini-api/docs/models). It creates full tracks of a couple of minutes at 44.1 kHz.
 - `lyria-3-clip-preview` creates 30 second clips and is useful to iterate quickly; set `LYRIA_MODEL=lyria-3-clip-preview` to use it.

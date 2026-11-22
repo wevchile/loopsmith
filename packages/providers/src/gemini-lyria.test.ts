@@ -114,3 +114,10 @@ describe('ProviderRegistry', () => {
     expect(registry.getProvider('gemini-lyria')?.model).toBe(DEFAULT_LYRIA_MODEL);
   });
 });
+
+describe('API version', () => {
+  it('defaults to v1beta because Lyria is not served on v1', async () => {
+    const { DEFAULT_API_VERSION } = await import('./gemini-lyria.js');
+    expect(DEFAULT_API_VERSION).toBe('v1beta');
+  });
+});

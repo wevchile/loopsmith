@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { DEFAULT_ANALYSIS_MODEL, DEFAULT_LYRIA_MODEL } from '@loopsmith/providers';
+import { DEFAULT_ANALYSIS_MODEL, DEFAULT_API_VERSION, DEFAULT_LYRIA_MODEL } from '@loopsmith/providers';
 
 export interface Config {
   port: number;
@@ -11,6 +11,7 @@ export interface Config {
   geminiApiKey?: string;
   lyriaModel: string;
   analysisModel: string;
+  geminiApiVersion: string;
   outputFormat: 'mp3' | 'wav';
 }
 
@@ -44,6 +45,7 @@ export function loadConfig(env: NodeJS.ProcessEnv, repoRoot: string): Config {
     geminiApiKey: cleanApiKey(env.GEMINI_API_KEY),
     lyriaModel: env.LYRIA_MODEL?.trim() || DEFAULT_LYRIA_MODEL,
     analysisModel: env.GEMINI_ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL,
+    geminiApiVersion: env.GEMINI_API_VERSION?.trim() || DEFAULT_API_VERSION,
     outputFormat: env.LYRIA_OUTPUT_FORMAT?.trim().toLowerCase() === 'wav' ? 'wav' : 'mp3',
   };
 }

@@ -9,6 +9,11 @@ import type { MusicProvider, ProviderConfig } from './provider.js';
  * See https://ai.google.dev/gemini-api/docs/music-generation and https://ai.google.dev/gemini-api/docs/models
  */
 export const DEFAULT_LYRIA_MODEL = 'lyria-3.5';
+/**
+ * Gemini API version. Lyria models are only served on v1beta (on v1 the API answers
+ * "404 Model 'lyria-3.5' not found"), while @google/genai defaults to v1.
+ */
+export const DEFAULT_API_VERSION = 'v1beta';
 /** Stable Gemini model used to listen to a reference track and describe it. */
 export const DEFAULT_ANALYSIS_MODEL = 'gemini-3.6-flash';
 
@@ -49,8 +54,8 @@ export interface GenAIClientLike {
 }
 
 /** Wraps the real @google/genai client so every call below is type-checked against the SDK. */
-export function createGenAIClient(apiKey: string): GenAIClientLike {
-  const ai = new GoogleGenAI({ apiKey });
+export function createGenAIClient(apiKey: string, apiVersion: string = DEFAULT_API_VERSION): GenAIClientLike {
+  const ai = new GoogleGenAI({ apiKey, apiVersion });
   return {
     interactions: {
       async create(params) {
@@ -181,7 +186,7 @@ export class GeminiLyriaProvider implements MusicProvider {
     this.name = `Google Lyria (${this.model})`;
     this.analysisModel = config.analysisModel || DEFAULT_ANALYSIS_MODEL;
     this.outputFormat = config.outputFormat === 'wav' ? 'wav' : 'mp3';
-    this.client = client ?? createGenAIClient(config.apiKey as string);
+    this.client = client ?? createGenAIClient(config.apiKey as string, config.apiVersion || DEFAULT_API_VERSION);
   }
 
   async generate(request: GenerateRequest): Promise<GenerateResult> {

@@ -30,6 +30,7 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
       apiKey: config.geminiApiKey,
       lyriaModel: config.lyriaModel,
       analysisModel: config.analysisModel,
+      apiVersion: config.geminiApiVersion,
       outputFormat: config.outputFormat,
     });
 
