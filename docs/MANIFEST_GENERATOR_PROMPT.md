@@ -17,6 +17,8 @@ Create a Loopsmith audio manifest for this repository.
 1. Write a script at `scripts/generate-loopsmith-manifest.mjs` (Node.js 18+, no dependencies required; you may use `music-metadata` if it is already installed to read durations). The script must:
    - Recursively scan the repository for audio files with extensions `.wav`, `.mp3`, `.ogg`, `.m4a`, `.flac` (case insensitive).
    - Skip `node_modules`, `.git`, build output folders (`dist`, `build`, `out`, `Library`, `Temp`, `.godot`, `.import`) and any folder starting with a dot.
+   - Skip files whose name starts with a dot (temporary files).
+   - If a file named `.loopsmith-backups.json` exists at the repository root, read it and skip every file listed in its `files[].path` (paths relative to the repository root, forward slashes, compare case-insensitively). These are numbered backups such as `soundtrack_autum_1.wav` that Loopsmith creates when an original is replaced; they must never become manifest entries. Do not skip other files just because their name ends in `_<number>`.
    - Write `loopsmith-manifest.json` at the repository root with the format below.
 2. Run the script and check that the output is valid against the format.
 3. Print a short summary: number of files per type and the list of files classified as `OTHER`.
@@ -68,6 +70,7 @@ Field rules:
 **Notes**
 
 - Do not move, rename or modify any audio file.
+- Never delete or edit `.loopsmith-backups.json`; Loopsmith maintains it. Commit it together with the backups if you want to keep them in version control, or add the backups and the file to `.gitignore` if you do not.
 - Sort entries by `relativePath` so diffs are easy to review.
 - Commit both `scripts/generate-loopsmith-manifest.mjs` and `loopsmith-manifest.json`.
 - When audio files change, run `node scripts/generate-loopsmith-manifest.mjs` again.

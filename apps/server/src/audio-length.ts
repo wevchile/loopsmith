@@ -32,6 +32,32 @@ function run(command: string, args: string[], timeoutMs = 60_000): Promise<{ cod
   });
 }
 
+export interface AudioFormat {
+  codec?: string;
+  sampleRate?: number;
+  channels?: number;
+  bitRate?: number;
+}
+
+/** Encoder settings per output extension; keeps the original PCM sample format for WAV. */
+export function codecArgs(ext: string, target: AudioFormat): string[] {
+  const kbps = (fallback: number) => `${Math.round((target.bitRate ?? fallback * 1000) / 1000)}k`;
+  switch (ext) {
+    case '.wav':
+      return ['-c:a', target.codec?.startsWith('pcm_') ? target.codec : 'pcm_s16le'];
+    case '.mp3':
+      return ['-c:a', 'libmp3lame', '-b:a', kbps(192)];
+    case '.ogg':
+      return ['-c:a', 'libvorbis', '-q:a', '6'];
+    case '.flac':
+      return ['-c:a', 'flac'];
+    case '.m4a':
+      return ['-c:a', 'aac', '-b:a', kbps(192)];
+    default:
+      throw new Error(`Unsupported output format: ${ext}`);
+  }
+}
+
 export class AudioTools {
   private ffmpegAvailable?: Promise<boolean>;
 
@@ -66,6 +92,46 @@ export class AudioTools {
       }
     }
     return measureBuffer(await readFile(filePath), filePath);
+  }
+
+  /** Codec, sample rate and channels of the first audio stream (ffprobe). Undefined fields when unknown. */
+  async probeFormat(filePath: string): Promise<AudioFormat> {
+    if (!(await this.hasFfmpeg())) return {};
+    try {
+      const r = await run(this.ffprobePath, [
+        '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name,sample_rate,channels,bit_rate', '-of', 'json', filePath,
+      ], 20_000);
+      if (r.code !== 0) return {};
+      const stream = (JSON.parse(r.stdout) as { streams?: Array<Record<string, string | number>> }).streams?.[0];
+      if (!stream) return {};
+      const num = (v: unknown) => {
+        const n = Number(v);
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+      };
+      return {
+        codec: typeof stream.codec_name === 'string' ? stream.codec_name : undefined,
+        sampleRate: num(stream.sample_rate),
+        channels: num(stream.channels),
+        bitRate: num(stream.bit_rate),
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Converts `input` to the format given by the extension of `output`, matching the sample rate and
+   * channels of `target` when known. Never overwrites `output` (ffmpeg -n).
+   */
+  async convert(input: string, output: string, target: AudioFormat): Promise<void> {
+    if (!(await this.hasFfmpeg())) throw new Error('ffmpeg is required to convert between audio formats');
+    const ext = path.extname(output).toLowerCase();
+    const args = ['-hide_banner', '-loglevel', 'error', '-n', '-i', input, '-map', '0:a:0', '-map_metadata', '-1'];
+    if (target.sampleRate) args.push('-ar', String(target.sampleRate));
+    if (target.channels) args.push('-ac', String(target.channels));
+    args.push(...codecArgs(ext, target), output);
+    const r = await run(this.ffmpegPath as string, args, 120_000);
+    if (r.code !== 0) throw new Error(`ffmpeg conversion failed: ${r.stderr.trim().slice(0, 300)}`);
   }
 
   /** Writes `input` cut to `seconds` (with a fade-out) to `output`. */

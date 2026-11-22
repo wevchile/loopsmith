@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { Project } from '@loopsmith/core';
 import { isValidEntryName, toSafeName } from '@loopsmith/core';
 import { HttpError, SOUND_TYPES, type Storage } from '../storage.js';
+import { ReplaceService, readReplacementRecords } from '../replace-service.js';
 import { listManifestTracks } from '../manifest-service.js';
 
 interface ProjectBody {
@@ -108,7 +109,18 @@ export const projectsRoutes: FastifyPluginAsync<{ storage: Storage }> = async (f
         },
       };
     });
-    const manifest = await listManifestTracks(storage, project);
+    const records = await readReplacementRecords(project.path);
+    const inGame = new Set<string>();
+    const manifest = (await listManifestTracks(storage, project)).map((track) => {
+      const stack = ReplaceService.activeStack(records, track.id.slice('manifest:'.length));
+      const latest = stack.at(-1);
+      if (!latest) return track;
+      inGame.add(latest.generationId);
+      return { ...track, replacement: { active: stack.length, latest } };
+    });
+    for (const track of local) {
+      if (track.generation && track.generationId && inGame.has(track.generationId)) track.generation.inGame = true;
+    }
     return { tracks: [...local, ...manifest] };
   });
 

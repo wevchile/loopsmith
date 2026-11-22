@@ -8,11 +8,16 @@ import { manifestRoutes } from './routes/manifest.js';
 import { audioRoutes } from './routes/audio.js';
 import { aiTrackRoutes } from './routes/ai-tracks.js';
 import { AudioTools } from './audio-length.js';
+import { replaceRoutes } from './routes/replace.js';
+import { ReplaceService, type FsOps } from './replace-service.js';
+import { entryPath } from './routes/ai-tracks.js';
 
 export interface AppOptions {
   logger?: boolean;
   providerRegistry?: ProviderRegistry;
   audioTools?: AudioTools;
+  /** File operations used by "replace original" (tests wrap them to check order and failures). */
+  fsOps?: FsOps;
 }
 
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -124,6 +129,8 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
   await app.register(manifestRoutes, { prefix: '/api', storage });
   await app.register(aiTrackRoutes, { prefix: '/api', storage });
   await app.register(audioRoutes, { prefix: '/api', storage });
+  const replaceService = new ReplaceService(storage, audioTools, (project, entry) => entryPath(storage, project, entry), options.fsOps);
+  await app.register(replaceRoutes, { prefix: '/api', storage, replaceService });
 
   return app;
 }

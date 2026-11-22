@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { CircleDashed, Crown, Sparkles, Star, XCircle } from 'lucide-react';
+import { CircleDashed, Crown, Gamepad2, Replace, Sparkles, Star, XCircle } from 'lucide-react';
 import type { AudioTrack, TrackStatus } from '../api';
 
 export const STATUS_ICON = { candidate: CircleDashed, chosen: Star, discarded: XCircle } as const;
@@ -35,4 +35,28 @@ export function SourceBadge({ track }: { track: AudioTrack }) {
     );
   }
   return null;
+}
+
+/** Original whose file in the game was replaced by an AI track (can be reverted). */
+export function ReplacedBadge({ track }: { track: AudioTrack }) {
+  const { t } = useTranslation();
+  const latest = track.replacement?.latest;
+  return (
+    <span className="badge replaced" title={latest ? t('replacedHelp', { backup: latest.backupRelativePath }) : undefined}>
+      <Replace size={11} />
+      {t('replaced')}
+      {track.replacement && track.replacement.active > 1 ? ` x${track.replacement.active}` : ''}
+    </span>
+  );
+}
+
+/** AI track currently written in the game in place of its original. */
+export function InGameBadge() {
+  const { t } = useTranslation();
+  return (
+    <span className="badge in-game" title={t('inGameHelp')}>
+      <Gamepad2 size={11} />
+      {t('inGame')}
+    </span>
+  );
 }

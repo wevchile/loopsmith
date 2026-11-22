@@ -1,8 +1,11 @@
 import path from 'node:path';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import type { AudioTrack, Manifest, ManifestEntry, ManifestSyncDiff, Project } from '@loopsmith/core';
 import { computeManifestDiff, manifestSchema, resolveInside } from '@loopsmith/core';
 import { HttpError, isAudioFile, type Storage } from './storage.js';
+
+/** Same name as in replace-service.ts (kept here to avoid an import cycle). */
+const BACKUP_REGISTRY_FILE = '.loopsmith-backups.json';
 
 export interface ManifestSummary {
   added: number;
@@ -61,7 +64,20 @@ export async function loadManifest(storage: Storage, manifestPath: string): Prom
       );
     }
   }
+  // Backups made by "replace original" are never manifest entries, even if an older generator script listed them.
+  const backups = await readBackupPaths(path.dirname(manifestPath));
+  if (backups.size > 0) manifest.entries = manifest.entries.filter((e) => !backups.has(e.relativePath.toLowerCase()));
   return manifest;
+}
+
+/** Relative paths listed in the game's .loopsmith-backups.json (lowercase). */
+async function readBackupPaths(gameRoot: string): Promise<Set<string>> {
+  try {
+    const data = JSON.parse(await readFile(path.join(gameRoot, BACKUP_REGISTRY_FILE), 'utf-8')) as { files?: Array<{ path?: unknown }> };
+    return new Set((data.files ?? []).map((f) => (typeof f.path === 'string' ? f.path.toLowerCase() : '')).filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 async function fileExists(p: string): Promise<boolean> {

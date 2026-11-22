@@ -34,9 +34,53 @@ export interface AudioTrack {
     prompt: string;
     model: string;
     timestamp: string;
+    /** This AI track is the one currently written over its original in the game. */
+    inGame?: boolean;
   };
+  hash?: string;
+  /** Originals only: active "replace original" operations (latest is in the game now). */
+  replacement?: { active: number; latest: ReplacementRecord };
   exists?: boolean;
   loopMarkers?: { start: number; end: number };
+}
+
+export interface ReplacementRecord {
+  id: string;
+  entryId: string;
+  relativePath: string;
+  backupRelativePath: string;
+  generationId: string;
+  sourceTrackId: string;
+  conversion?: { from: string; to: string; sampleRate?: number; channels?: number; codec?: string };
+  hashBefore: string;
+  hashAfter: string;
+  durationBefore?: number;
+  durationAfter?: number;
+  replacedAt: string;
+  status: 'active' | 'reverted';
+  revertedAt?: string;
+  revertResult?: { action: 'deleted' | 'kept'; keptRelativePath?: string };
+}
+
+export interface ReplacePreview {
+  generationId: string;
+  originalTrackId: string;
+  entryId: string;
+  gameRoot: string;
+  manifestPath: string;
+  source: { path: string; name: string; format: string };
+  target: { path: string; relativePath: string; name: string; format: string };
+  backup: { path: string; relativePath: string; name: string };
+  conversion: ReplacementRecord['conversion'] | null;
+  activeReplacements: number;
+}
+
+export interface RevertPreview {
+  entryId: string;
+  record: ReplacementRecord;
+  target: { path: string; relativePath: string; name: string };
+  backup: { path: string; relativePath: string; name: string };
+  current: { exists: boolean; matchesReplacement: boolean; action: 'delete' | 'keep'; keepRelativePath?: string };
 }
 
 export interface GenerationHistory {
@@ -178,7 +222,24 @@ export const api = {
     request<{ entry: GenerationHistory }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}/duplicate`, { method: 'POST' }),
   deleteGeneration: (projectId: string, genId: string) =>
     request(`/api/projects/${enc(projectId)}/generations/${enc(genId)}`, { method: 'DELETE' }),
-  audioUrl: (projectId: string, trackId: string) => `/api/projects/${enc(projectId)}/audio?trackId=${enc(trackId)}`,
+  /** `version` (for example the file hash) makes the player reload a file whose content changed. */
+  audioUrl: (projectId: string, trackId: string, version?: string) =>
+    `/api/projects/${enc(projectId)}/audio?trackId=${enc(trackId)}${version ? `&v=${enc(version.slice(-12))}` : ''}`,
+
+  replacePreview: (projectId: string, genId: string) =>
+    request<{ preview: ReplacePreview }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}/replace-original`).then((d) => d.preview),
+  replaceOriginal: (projectId: string, genId: string, expectedBackupName: string) =>
+    request<{ record: ReplacementRecord }>(`/api/projects/${enc(projectId)}/generations/${enc(genId)}/replace-original`, {
+      method: 'POST',
+      json: { confirm: true, expectedBackupName },
+    }),
+  revertPreview: (projectId: string, entryId: string) =>
+    request<{ preview: RevertPreview }>(`/api/projects/${enc(projectId)}/originals/${enc(entryId)}/revert`).then((d) => d.preview),
+  revertOriginal: (projectId: string, entryId: string) =>
+    request<{ record: ReplacementRecord; matchesOriginal: boolean }>(`/api/projects/${enc(projectId)}/originals/${enc(entryId)}/revert`, {
+      method: 'POST',
+      json: { confirm: true },
+    }),
 
   folders: (id: string) => request<{ tree: FolderNode }>(`/api/projects/${enc(id)}/folders`).then((d) => d.tree),
   createFolder: (id: string, parent: string, name: string) =>

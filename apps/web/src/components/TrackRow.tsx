@@ -19,7 +19,7 @@ import { api, type AudioTrack, type TrackStatus } from '../api';
 import type { LibraryActions } from '../actions';
 import { AudioPlayer, PLAY_STATE_EVENT, TOGGLE_PLAY_EVENT } from './AudioPlayer';
 import { Menu } from './Menu';
-import { SourceBadge, StatusBadge } from './StatusBadge';
+import { InGameBadge, ReplacedBadge, SourceBadge, StatusBadge } from './StatusBadge';
 
 interface Props {
   projectId: string;
@@ -121,6 +121,8 @@ export function TrackRow({
             </span>
             <SourceBadge track={track} />
             {status && <StatusBadge status={status} />}
+            {track.replacement && <ReplacedBadge track={track} />}
+            {track.generation?.inGame && <InGameBadge />}
             {missing && <span className="badge missing">{t('missingFile')}</span>}
           </div>
           <div className="track-meta">
@@ -192,7 +194,7 @@ export function TrackRow({
       </div>
       {selected && !missing && (
         <div className="row-player">
-          <AudioPlayer url={api.audioUrl(projectId, track.id)} autoPlay={autoPlay} />
+          <AudioPlayer url={api.audioUrl(projectId, track.id, track.hash)} autoPlay={autoPlay} />
         </div>
       )}
     </div>

@@ -107,6 +107,13 @@ export interface AudioTrack {
     prompt: string;
     model: string;
     timestamp: string;
+    /** True when this AI track is the one currently written over its original in the game repo. */
+    inGame?: boolean;
+  };
+  /** For manifest originals: active replacements made with "Reemplazar original" (latest last). */
+  replacement?: {
+    active: number;
+    latest: ReplacementRecord;
   };
   hash?: string;
   loopMarkers?: { start: number; end: number };
@@ -182,4 +189,32 @@ export interface GenerateResult {
   /** Raw structure text returned by the model (section markers or JSON). */
   structure?: string;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * One "replace original" operation: an AI track was written over a manifest original in the game
+ * repository after the original was renamed to a numbered backup. Stored in replacements.json.
+ */
+export interface ReplacementRecord {
+  id: string;
+  /** Manifest entry id of the original. */
+  entryId: string;
+  /** Path of the original, relative to the game repository (the manifest folder). */
+  relativePath: string;
+  /** Path of the numbered backup, relative to the game repository. */
+  backupRelativePath: string;
+  /** History entry id of the AI track that was written. */
+  generationId: string;
+  /** Project-relative path of the AI track at the time of the replacement. */
+  sourceTrackId: string;
+  conversion?: { from: string; to: string; sampleRate?: number; channels?: number; codec?: string };
+  hashBefore: string;
+  hashAfter: string;
+  durationBefore?: number;
+  durationAfter?: number;
+  replacedAt: string;
+  status: 'active' | 'reverted';
+  revertedAt?: string;
+  /** What happened to the replaced (AI) version on revert. */
+  revertResult?: { action: 'deleted' | 'kept'; keptRelativePath?: string };
 }

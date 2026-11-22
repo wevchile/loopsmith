@@ -49,6 +49,7 @@ function Workspace() {
   const [autoPlayId, setAutoPlayId] = useState<string | null>(null);
   const [useReference, setUseReference] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab | null>(null);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('generate');
   const [inspectorOpen, setInspectorOpen] = useState(() => localStorage.getItem(INSPECTOR_KEY) !== 'false');
@@ -222,6 +223,15 @@ function Workspace() {
         </div>
       )}
 
+      {notice && (
+        <div className="banner success" role="status">
+          <span>{notice}</span>
+          <button className="icon-btn" onClick={() => setNotice(null)} aria-label={t('close')}>
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {project ? (
         <main className="workspace">
           <Library
@@ -262,6 +272,10 @@ function Workspace() {
                   actions={actions}
                   onUseAsBase={useAsBase}
                   onSelectTrack={(id) => setSelectedTrackId(id)}
+                  onReplaced={async (message) => {
+                    setNotice(message);
+                    await reload();
+                  }}
                 />
               }
               history={<HistoryPanel history={history} onSelectTrack={(id) => setSelectedTrackId(id)} />}

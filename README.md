@@ -9,7 +9,8 @@ The interface is in Spanish by default and can be switched to English.
 - **Projects per game**: each game is a folder on your disk with its own settings, sounds and history.
 - **Dark, editor-style UI**: a two-column workspace (sound library on the left, a collapsible inspector with Generate / Track / History tabs on the right), Spanish by default with an English switch.
 - **Folders CRUD**: create, rename and delete folders and subfolders from the library folder bar or the settings modal. New projects start with one folder per sound type: `SOUNDTRACK`, `SFX`, `VO`, `AMBIENCE`, `OTHER`.
-- **Originals vs AI tracks**: sounds from the game manifest carry an "Original" badge and are read-only. AI tracks carry an "IA / AI" badge and a status: Candidata (default), Elegida or Descartada. AI tracks can be linked to an original (automatic when you generate with an original as the base) and are grouped under it. Only one AI track per original can be Elegida.
+- **Originals vs AI tracks**: sounds from the game manifest carry an "Original" badge and are read-only (except through "Replace original", below). AI tracks carry an "IA / AI" badge and a status: Candidata (default), Elegida or Descartada. AI tracks can be linked to an original (automatic when you generate with an original as the base) and are grouped under it. Only one AI track per original can be Elegida.
+- **Replace original**: write a chosen AI track over its original in your local game repository. The original is first renamed to a numbered backup in the same folder (`soundtrack_autum.wav` becomes `soundtrack_autum_1.wav`), the format is converted with ffmpeg when needed, the manifest entry is updated, and every replacement can be reverted.
 - **AI track actions**: rename (the file on disk too), move to another folder, duplicate, delete (with confirmation), notes and tags. Any track, original or AI, can be downloaded.
 - **Project context (optional)**: a text such as "everything in retro 8-bit style" that is added to every prompt of the project.
 - **Generate music from a prompt** with Lyria. Files are saved locally in the folder you choose.
@@ -130,6 +131,7 @@ loopsmith-data/
   My_Game/
     loopsmith.project.json   project settings (name, context, vocals default, linked manifest)
     history.json             generation history and AI track metadata (status, linked original, notes, tags)
+    replacements.json        log of "replace original" operations (paths, backups, hashes before and after)
     manifest.snapshot.json   last applied manifest (only when a manifest is linked)
     SOUNDTRACK/ SFX/ VO/ AMBIENCE/ OTHER/   your audio files and subfolders
 ```
@@ -177,6 +179,24 @@ Example:
   ]
 }
 ```
+
+## Replacing an original in the game
+
+"Reemplazar original / Replace original" is the only action that writes into your game repository. It is available in the Track tab for an AI track that is linked to an original (highlighted when the track is Elegida). A warning modal shows the AI file, the original's exact path, the backup name and any format conversion, and you must tick the confirmation box.
+
+What happens, in this order:
+
+1. Loopsmith picks the next free numbered name in the same folder: `soundtrack_autum_1.wav`, then `_2`, `_3`... Names that exist on disk, belong to another manifest entry or are earlier backups are skipped.
+2. The original is **renamed** to that backup name first, so two files never share a name.
+3. The AI track is copied (or converted with ffmpeg to the original's format, keeping its sample rate and channels) to a temporary file in the same folder and then renamed to the original's exact file name. Existing files are never overwritten.
+4. The manifest entry's `hash` (and `duration`, if the entry has one) is updated in `loopsmith-manifest.json`, keeping the file's formatting, order and other entries. The project snapshot is updated too, so "Check for changes" stays clean.
+5. The backup is listed in `.loopsmith-backups.json` at the game root (backups are never added to the manifest), and the operation is recorded in `replacements.json` in the project with hashes before and after.
+
+If any step after the rename fails, the original gets its name back and the manifest is restored.
+
+**Reverting**: select the original (badge "Reemplazado") and press "Revertir reemplazo". The current AI version is removed (the AI track is still in your project) and the latest backup gets the original name back. If the file was modified after the replacement, it is kept with the next numbered name instead of deleted. Replacements stack: replacing twice and reverting twice brings back the first original.
+
+ffmpeg is required only when the AI track and the original have different formats (for example MP3 to WAV).
 
 ## About Lyria
 

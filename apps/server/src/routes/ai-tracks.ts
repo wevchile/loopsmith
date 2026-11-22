@@ -62,7 +62,7 @@ function findEntry(history: GenerationHistory[], id: string): GenerationHistory 
 }
 
 /** Makes sure an entry's file is inside the project before touching it. */
-function entryPath(storage: Storage, project: Project, entry: GenerationHistory): string {
+export function entryPath(storage: Storage, project: Project, entry: GenerationHistory): string {
   const rel = entry.outputTrackId?.startsWith('local:')
     ? entry.outputTrackId.slice('local:'.length)
     : toPosix(path.relative(project.path, entry.outputPath));

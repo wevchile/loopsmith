@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Copy, Download, FolderInput, Link2, Lock, Pencil, Save, Trash2, Wand2 } from 'lucide-react';
+import { Copy, Download, FolderInput, Link2, Lock, Pencil, Replace, Save, Trash2, Undo2, Wand2 } from 'lucide-react';
 import { TRACK_STATUSES, api, type AudioTrack } from '../api';
 import type { LibraryActions } from '../actions';
-import { SourceBadge, StatusBadge, STATUS_ICON } from './StatusBadge';
+import { InGameBadge, ReplacedBadge, SourceBadge, StatusBadge, STATUS_ICON } from './StatusBadge';
+import { ReplaceOriginalModal } from './ReplaceOriginalModal';
 
 interface Props {
   projectId: string;
@@ -12,18 +13,29 @@ interface Props {
   actions: LibraryActions;
   onUseAsBase: (track: AudioTrack) => void;
   onSelectTrack: (id: string) => void;
+  /** Reloads tracks after a replace or revert and shows a message. */
+  onReplaced: (message: string) => Promise<void> | void;
 }
 
 /** Inspector tab with everything about the selected track: status, link, notes, tags and file actions. */
-export function TrackDetails({ projectId, track, tracks, actions, onUseAsBase, onSelectTrack }: Props) {
+export function TrackDetails({ projectId, track, tracks, actions, onUseAsBase, onSelectTrack, onReplaced }: Props) {
   const { t, i18n } = useTranslation();
   const [notes, setNotes] = useState('');
   const [tags, setTags] = useState('');
+  const [replaceMode, setReplaceMode] = useState<'replace' | 'revert' | null>(null);
 
   useEffect(() => {
     setNotes(track?.generation?.notes ?? '');
     setTags((track?.generation?.tags ?? []).join(', '));
   }, [track?.id, track?.generation?.notes, track?.generation?.tags]);
+
+  useEffect(() => setReplaceMode(null), [track?.id]);
+  const modalMode = useMemo(
+    () => (track && replaceMode ? (replaceMode === 'replace' ? { kind: 'replace' as const, track } : { kind: 'revert' as const, original: track }) : null),
+    // Only rebuilt when the modal opens or the track changes, so the preview is fetched once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [replaceMode, track?.id]
+  );
 
   if (!track) return <p className="empty-state">{t('selectTrackHint')}</p>;
 
@@ -42,6 +54,8 @@ export function TrackDetails({ projectId, track, tracks, actions, onUseAsBase, o
         <div className="badges">
           <SourceBadge track={track} />
           {track.generation && <StatusBadge status={track.generation.status} />}
+          {track.replacement && <ReplacedBadge track={track} />}
+          {track.generation?.inGame && <InGameBadge />}
         </div>
       </div>
 
@@ -73,9 +87,42 @@ export function TrackDetails({ projectId, track, tracks, actions, onUseAsBase, o
 
       {track.source === 'manifest' && (
         <>
-          <p className="readonly-note">
-            <Lock size={13} /> {t('originalReadOnly')}
-          </p>
+          {track.replacement ? (
+            <div className="replaced-box">
+              <p>
+                <Replace size={13} /> {t('replacedBy', { name: tracks.find((tr) => tr.generationId === track.replacement!.latest.generationId)?.name ?? track.replacement.latest.sourceTrackId })}
+              </p>
+              <dl className="details-grid">
+                <dt>{t('backupFile')}</dt>
+                <dd>
+                  <code>{track.replacement.latest.backupRelativePath}</code>
+                </dd>
+                <dt>{t('replacedAt')}</dt>
+                <dd>{new Date(track.replacement.latest.replacedAt).toLocaleString(i18n.resolvedLanguage)}</dd>
+                {track.replacement.latest.conversion && (
+                  <>
+                    <dt>{t('conversion')}</dt>
+                    <dd>
+                      {track.replacement.latest.conversion.from.toUpperCase()} {'->'} {track.replacement.latest.conversion.to.toUpperCase()}
+                    </dd>
+                  </>
+                )}
+                {track.replacement.active > 1 && (
+                  <>
+                    <dt>{t('previousReplacements')}</dt>
+                    <dd>{t('previousReplacementsNote', { count: track.replacement.active - 1 })}</dd>
+                  </>
+                )}
+              </dl>
+              <button className="btn" onClick={() => setReplaceMode('revert')}>
+                <Undo2 size={14} /> {t('revertReplacement')}
+              </button>
+            </div>
+          ) : (
+            <p className="readonly-note">
+              <Lock size={13} /> {t('originalReadOnly')}
+            </p>
+          )}
           <h4 className="section-title">{t('candidatesFor')}</h4>
           {candidates.length === 0 ? (
             <p className="muted small">{t('noCandidates')}</p>
@@ -122,6 +169,14 @@ export function TrackDetails({ projectId, track, tracks, actions, onUseAsBase, o
               <Link2 size={13} /> {original ? t('change') : t('linkOriginal')}
             </button>
           </div>
+          {original && (
+            <div className={`replace-cta ${track.generation.status === 'chosen' ? 'emphasis' : ''}`}>
+              <p className="muted small">{track.generation.inGame ? t('inGameNote') : t('replaceOriginalHelp')}</p>
+              <button className="btn warning" onClick={() => setReplaceMode('replace')} disabled={original.exists === false || track.generation.inGame}>
+                <Replace size={14} /> {t('replaceOriginal')}
+              </button>
+            </div>
+          )}
 
           <h4 className="section-title">{t('notes')}</h4>
           <textarea value={notes} rows={3} placeholder={t('notesPlaceholder')} onChange={(e) => setNotes(e.target.value)} />
@@ -153,6 +208,10 @@ export function TrackDetails({ projectId, track, tracks, actions, onUseAsBase, o
             </button>
           </div>
         </>
+      )}
+
+      {modalMode && (
+        <ReplaceOriginalModal projectId={projectId} mode={modalMode} tracks={tracks} onClose={() => setReplaceMode(null)} onDone={onReplaced} />
       )}
     </div>
   );
