@@ -3,71 +3,103 @@ import WaveSurfer from 'wavesurfer.js';
 import { useTranslation } from 'react-i18next';
 
 interface AudioPlayerProps {
-  audioPath: string;
+  url: string;
+  autoPlay?: boolean;
 }
 
-export function AudioPlayer({ audioPath }: AudioPlayerProps) {
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+export function AudioPlayer({ url, autoPlay = false }: AudioPlayerProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
-  const wavesurferRef = useRef<WaveSurfer | null>(null);
+  const wsRef = useRef<WaveSurfer | null>(null);
+  const loopRef = useRef(false);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [volume, setVolume] = useState(0.7);
+  const [volume, setVolume] = useState(0.8);
   const [loop, setLoop] = useState(false);
+  const [time, setTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   useEffect(() => {
     if (!containerRef.current) return;
-
-    const wavesurfer = WaveSurfer.create({
+    setReady(false);
+    setError(null);
+    const ws = WaveSurfer.create({
       container: containerRef.current,
-      waveColor: '#4a9eff',
+      url,
+      waveColor: '#8fb8e8',
       progressColor: '#1e73be',
       cursorColor: '#333',
-      height: 80,
+      height: 64,
       barWidth: 2,
       barGap: 1,
+      normalize: true,
     });
-
-    wavesurfer.on('finish', () => {
-      if (loop) {
-        wavesurfer.play();
+    ws.on('ready', (d) => {
+      setReady(true);
+      setDuration(d);
+      ws.setVolume(volume);
+      if (autoPlay) void ws.play().catch(() => undefined);
+    });
+    ws.on('error', (e) => setError(e instanceof Error ? e.message : String(e)));
+    ws.on('timeupdate', (cur) => setTime(cur));
+    ws.on('play', () => setIsPlaying(true));
+    ws.on('pause', () => setIsPlaying(false));
+    ws.on('finish', () => {
+      if (loopRef.current) {
+        ws.setTime(0);
+        void ws.play();
       } else {
         setIsPlaying(false);
       }
     });
-
-    wavesurfer.on('play', () => setIsPlaying(true));
-    wavesurfer.on('pause', () => setIsPlaying(false));
-
-    wavesurfer.load(audioPath);
-    wavesurfer.setVolume(volume);
-
-    wavesurferRef.current = wavesurfer;
-
+    wsRef.current = ws;
     return () => {
-      wavesurfer.destroy();
+      ws.destroy();
+      wsRef.current = null;
     };
-  }, [audioPath, loop]);
+    // volume and autoPlay are read once on load on purpose.
+  }, [url]);
 
   useEffect(() => {
-    if (wavesurferRef.current) {
-      wavesurferRef.current.setVolume(volume);
-    }
+    wsRef.current?.setVolume(volume);
   }, [volume]);
 
-  const handlePlayPause = () => {
-    if (wavesurferRef.current) {
-      wavesurferRef.current.playPause();
-    }
+  useEffect(() => {
+    loopRef.current = loop;
+  }, [loop]);
+
+  const stop = () => {
+    wsRef.current?.stop();
+    setIsPlaying(false);
   };
 
   return (
-    <div style={{ padding: '10px', background: '#f5f5f5', borderRadius: '8px' }}>
-      <div ref={containerRef} style={{ marginBottom: '10px' }} />
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-        <button onClick={handlePlayPause}>
+    <div className="player">
+      <div ref={containerRef} className="waveform" />
+      {error && <div className="error-text">{error}</div>}
+      <div className="player-controls">
+        <button onClick={() => wsRef.current?.playPause()} disabled={!ready}>
           {isPlaying ? t('pause') : t('play')}
         </button>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+        <button className="secondary" onClick={stop} disabled={!ready}>
+          {t('stop')}
+        </button>
+        <span className="time">
+          {ready ? `${formatTime(time)} / ${formatTime(duration)}` : t('loading')}
+        </span>
+        <label className="inline">
+          <input type="checkbox" checked={loop} onChange={(e) => setLoop(e.target.checked)} />
+          {t('loop')}
+        </label>
+        <label className="inline">
           {t('volume')}
           <input
             type="range"
@@ -77,14 +109,6 @@ export function AudioPlayer({ audioPath }: AudioPlayerProps) {
             value={volume}
             onChange={(e) => setVolume(parseFloat(e.target.value))}
           />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-          <input
-            type="checkbox"
-            checked={loop}
-            onChange={(e) => setLoop(e.target.checked)}
-          />
-          {t('loop')}
         </label>
       </div>
     </div>

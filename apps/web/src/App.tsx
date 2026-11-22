@@ -1,178 +1,195 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { api, type Project, type AudioTrack, type Provider } from './api';
+import { api, type AudioTrack, type FolderNode, type GenerationHistory, type Health, type Project } from './api';
 import { ProjectList } from './components/ProjectList';
-import { GenerationPanel } from './components/GenerationPanel';
+import { ProjectSettings } from './components/ProjectSettings';
+import { FolderTree } from './components/FolderTree';
 import { TrackList } from './components/TrackList';
+import { GenerationPanel, type GenerateInput } from './components/GenerationPanel';
+import { HistoryPanel } from './components/HistoryPanel';
+import { ManifestPanel } from './components/ManifestPanel';
 import { LanguageSwitcher } from './components/LanguageSwitcher';
+
+function flattenFolders(node: FolderNode | null): string[] {
+  if (!node) return [];
+  const out: string[] = [];
+  const walk = (n: FolderNode) => {
+    out.push(n.path);
+    n.children.forEach(walk);
+  };
+  walk(node);
+  return out;
+}
 
 export function App() {
   const { t } = useTranslation();
+  const [health, setHealth] = useState<Health | null>(null);
+  const [serverDown, setServerDown] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
-  const [selectedTrack, setSelectedTrack] = useState<AudioTrack | null>(null);
-  const [referenceTrack, setReferenceTrack] = useState<AudioTrack | null>(null);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [apiKeyConfigured, setApiKeyConfigured] = useState(true);
+  const [history, setHistory] = useState<GenerationHistory[]>([]);
+  const [tree, setTree] = useState<FolderNode | null>(null);
+  const [selectedFolder, setSelectedFolder] = useState('');
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  const [useReference, setUseReference] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadProjects();
-    loadProviders();
-    checkHealth();
+  const project = projects.find((p) => p.id === selectedId) ?? null;
+  const selectedTrack = tracks.find((tr) => tr.id === selectedTrackId) ?? null;
+  const folders = useMemo(() => flattenFolders(tree), [tree]);
+
+  const loadProjects = useCallback(async () => {
+    const list = await api.listProjects();
+    setProjects(list);
+    return list;
   }, []);
 
   useEffect(() => {
-    if (selectedProject) {
-      loadTracks(selectedProject.id);
-    } else {
-      setTracks([]);
-      setSelectedTrack(null);
-    }
-  }, [selectedProject]);
+    (async () => {
+      try {
+        setHealth(await api.health());
+        await loadProjects();
+        setServerDown(false);
+      } catch {
+        setServerDown(true);
+      }
+    })();
+  }, [loadProjects]);
 
-  async function checkHealth() {
+  const loadProjectData = useCallback(async (id: string) => {
     try {
-      const health = await api.getHealth();
-      setApiKeyConfigured(health.apiKeyConfigured);
-    } catch (error) {
-      console.error('Health check failed:', error);
+      const [tr, hi, fo] = await Promise.all([api.tracks(id), api.history(id), api.folders(id)]);
+      setTracks(tr);
+      setHistory(hi);
+      setTree(fo);
+    } catch (e) {
+      setError((e as Error).message);
     }
-  }
+  }, []);
 
-  async function loadProjects() {
+  useEffect(() => {
+    setTracks([]);
+    setHistory([]);
+    setTree(null);
+    setSelectedFolder('');
+    setSelectedTrackId(null);
+    setUseReference(false);
+    if (selectedId) void loadProjectData(selectedId);
+  }, [selectedId, loadProjectData]);
+
+  const replaceProject = async (updated: Project) => {
+    setProjects((list) => list.map((p) => (p.id === updated.id ? updated : p)));
+    await loadProjectData(updated.id);
+  };
+
+  const handleCreate = async (input: { name: string; context?: string; defaultVocalsEnabled: boolean; rootIndex: number }) => {
     try {
-      const data = await api.getProjects();
-      setProjects(data);
-    } catch (error) {
-      console.error('Failed to load projects:', error);
+      const created = await api.createProject(input);
+      await loadProjects();
+      setSelectedId(created.id);
+    } catch (e) {
+      setError((e as Error).message);
     }
-  }
+  };
 
-  async function loadProviders() {
-    try {
-      const data = await api.getProviders();
-      setProviders(data);
-    } catch (error) {
-      console.error('Failed to load providers:', error);
-    }
-  }
-
-  async function loadTracks(projectId: string) {
-    try {
-      const data = await api.getProjectTracks(projectId);
-      setTracks(data);
-    } catch (error) {
-      console.error('Failed to load tracks:', error);
-    }
-  }
-
-  async function handleCreateProject(
-    name: string,
-    context?: string,
-    defaultVocalsEnabled?: boolean
-  ) {
-    try {
-      const project = await api.createProject(name, context, defaultVocalsEnabled);
-      setProjects([...projects, project]);
-      setSelectedProject(project);
-    } catch (error) {
-      console.error('Failed to create project:', error);
-      alert('Failed to create project');
-    }
-  }
-
-  async function handleGenerate(params: {
-    providerId: string;
-    prompt: string;
-    vocalsEnabled: boolean;
-    duration?: number;
-    referenceTrackPath?: string;
-    outputFolder: string;
-  }) {
-    if (!selectedProject) return;
-
-    await api.generate({
-      projectId: selectedProject.id,
-      ...params,
-    });
-
-    await loadTracks(selectedProject.id);
-    setReferenceTrack(null);
-  }
+  const handleGenerate = async (input: GenerateInput) => {
+    if (!project) throw new Error('No project');
+    const entry = await api.generate({ projectId: project.id, ...input });
+    await loadProjectData(project.id);
+    if (entry.outputTrackId) setSelectedTrackId(entry.outputTrackId);
+    return entry.outputTrackId?.replace(/^local:/, '') ?? entry.outputPath;
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <header
-        style={{
-          padding: '10px 20px',
-          background: '#1e73be',
-          color: 'white',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <h1 style={{ margin: 0 }}>{t('appName')}</h1>
+    <div className="app">
+      <header className="topbar">
+        <div>
+          <h1>loopsmith</h1>
+          <span className="tagline">{t('appTagline')}</span>
+        </div>
         <LanguageSwitcher />
       </header>
 
-      {!apiKeyConfigured && (
-        <div
-          style={{
-            padding: '10px 20px',
-            background: '#fff3cd',
-            border: '1px solid #ffc107',
-            color: '#856404',
-          }}
-        >
-          {t('apiKeyMissing')}
+      {serverDown && <div className="banner error">{t('serverDown')}</div>}
+      {health && !health.generation.available && <div className="banner warning">{t('generationUnavailable')}</div>}
+      {error && (
+        <div className="banner error" onClick={() => setError(null)}>
+          {t('errorPrefix')}: {error} (x)
         </div>
       )}
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+      <div className="layout">
         <ProjectList
           projects={projects}
-          selectedProject={selectedProject}
-          onSelectProject={setSelectedProject}
-          onCreateProject={handleCreateProject}
+          roots={health?.allowedRoots ?? []}
+          selectedId={selectedId}
+          onSelect={(p) => setSelectedId(p.id)}
+          onCreate={handleCreate}
         />
 
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          {selectedProject ? (
-            <>
-              <div style={{ flex: 1, overflowY: 'auto', borderRight: '1px solid #ddd' }}>
-                <TrackList
-                  tracks={tracks}
-                  selectedTrack={selectedTrack}
-                  onSelectTrack={setSelectedTrack}
-                  onSetReference={setReferenceTrack}
-                />
-              </div>
-              <div style={{ width: '400px', overflowY: 'auto', borderLeft: '1px solid #ddd' }}>
-                <GenerationPanel
-                  project={selectedProject}
-                  providers={providers}
-                  referenceTrack={referenceTrack}
-                  onGenerate={handleGenerate}
-                  onClearReference={() => setReferenceTrack(null)}
-                />
-              </div>
-            </>
-          ) : (
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#666',
-              }}
-            >
-              {t('selectProject')}
+        {project ? (
+          <main className="workspace">
+            <div className="column left">
+              <ProjectSettings
+                project={project}
+                onSave={async (changes) => {
+                  try {
+                    await replaceProject(await api.updateProject(project.id, changes));
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+                onRemove={async () => {
+                  try {
+                    await api.unlinkProject(project.id);
+                    setSelectedId(null);
+                    await loadProjects();
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+              />
+              <FolderTree
+                projectId={project.id}
+                tree={tree}
+                selectedFolder={selectedFolder}
+                onSelect={setSelectedFolder}
+                onChanged={() => loadProjectData(project.id)}
+                onError={setError}
+              />
+              <ManifestPanel project={project} onProjectChange={replaceProject} />
             </div>
-          )}
-        </div>
+            <div className="column center">
+              <TrackList
+                projectId={project.id}
+                tracks={tracks}
+                selectedFolder={selectedFolder}
+                selectedTrackId={selectedTrackId}
+                onSelect={(tr) => setSelectedTrackId(tr.id === selectedTrackId ? null : tr.id)}
+                onUseAsBase={(tr) => {
+                  setSelectedTrackId(tr.id);
+                  setUseReference(true);
+                }}
+              />
+            </div>
+            <div className="column right">
+              <GenerationPanel
+                project={project}
+                health={health}
+                folders={folders}
+                defaultFolder={selectedFolder || 'SOUNDTRACK'}
+                selectedTrack={selectedTrack}
+                useReference={useReference}
+                onUseReferenceChange={setUseReference}
+                onGenerate={handleGenerate}
+              />
+              <HistoryPanel history={history} onSelectTrack={setSelectedTrackId} />
+            </div>
+          </main>
+        ) : (
+          <main className="empty">{t('selectProject')}</main>
+        )}
       </div>
     </div>
   );

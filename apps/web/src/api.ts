@@ -1,3 +1,6 @@
+export type SoundType = 'SOUNDTRACK' | 'SFX' | 'VO' | 'AMBIENCE' | 'OTHER';
+export const SOUND_TYPES: SoundType[] = ['SOUNDTRACK', 'SFX', 'VO', 'AMBIENCE', 'OTHER'];
+
 export interface Project {
   id: string;
   name: string;
@@ -5,6 +8,7 @@ export interface Project {
   context?: string;
   defaultVocalsEnabled: boolean;
   manifestPath?: string;
+  manifestSyncedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -13,137 +17,135 @@ export interface AudioTrack {
   id: string;
   name: string;
   path: string;
-  type: string;
+  type: SoundType;
   folder: string;
+  source: 'local' | 'manifest';
   duration?: number;
   isGenerated: boolean;
-  generationId?: string;
+  exists?: boolean;
+  loopMarkers?: { start: number; end: number };
 }
 
 export interface GenerationHistory {
   id: string;
-  projectId: string;
   prompt: string;
   composedPrompt: string;
   model: string;
-  parameters: Record<string, unknown>;
-  seed?: string;
   vocalsEnabled: boolean;
   referenceTrackId?: string;
+  referenceDescription?: string;
+  lyrics?: string;
   timestamp: string;
   outputPath: string;
+  outputTrackId?: string;
 }
 
-export interface Provider {
-  id: string;
+export interface FolderNode {
   name: string;
-  capabilities: {
-    supportsInstrumental: boolean;
-    supportsVocals: boolean;
-    supportsReferenceAudio: boolean;
-    maxDurationSeconds: number;
-    outputFormats: string[];
-  };
+  path: string;
+  children: FolderNode[];
 }
 
-export interface HealthResponse {
+export interface Health {
   status: string;
-  providers: Array<{ id: string; name: string }>;
   apiKeyConfigured: boolean;
+  generation: { available: boolean; model?: string; providerId?: string; reason?: string; message?: string };
   allowedRoots: string[];
 }
 
-const API_BASE = '/api';
+export interface ManifestEntry {
+  id: string;
+  name: string;
+  type: SoundType;
+  folder: string;
+  relativePath: string;
+}
+
+export interface ManifestPreview {
+  manifestPath: string;
+  isFirstLink: boolean;
+  entryCount: number;
+  gameRepo: string;
+  missingFiles: string[];
+  summary: { added: number; removed: number; renamed: number; moved: number; updated: number; unchanged: number; hasChanges: boolean };
+  diff: {
+    added: ManifestEntry[];
+    removed: ManifestEntry[];
+    renamed: Array<{ old: ManifestEntry; new: ManifestEntry }>;
+    moved: Array<{ old: ManifestEntry; new: ManifestEntry }>;
+    updated: Array<{ old: ManifestEntry; new: ManifestEntry }>;
+  };
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly code?: string
+  ) {
+    super(message);
+  }
+}
+
+async function request<T>(url: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+  const { json, ...rest } = init ?? {};
+  const res = await fetch(url, {
+    ...rest,
+    headers: json !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: json !== undefined ? JSON.stringify(json) : undefined,
+  });
+  const text = await res.text();
+  let data: unknown = undefined;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    // Non JSON response (for example the dev proxy cannot reach the server).
+  }
+  if (!res.ok) {
+    const body = (data ?? {}) as { error?: string; code?: string };
+    throw new ApiError(body.error || `${res.status} ${res.statusText}`, res.status, body.code);
+  }
+  return data as T;
+}
+
+const enc = encodeURIComponent;
 
 export const api = {
-  async getHealth(): Promise<HealthResponse> {
-    const res = await fetch('/health');
-    if (!res.ok) throw new Error('Health check failed');
-    return res.json();
-  },
+  health: () => request<Health>('/api/health'),
 
-  async getProjects(): Promise<Project[]> {
-    const res = await fetch(`${API_BASE}/projects`);
-    if (!res.ok) throw new Error('Failed to fetch projects');
-    const data = await res.json();
-    return data.projects;
-  },
+  listProjects: () => request<{ projects: Project[] }>('/api/projects').then((d) => d.projects),
+  createProject: (body: { name: string; context?: string; defaultVocalsEnabled?: boolean; rootIndex?: number }) =>
+    request<{ project: Project }>('/api/projects', { method: 'POST', json: body }).then((d) => d.project),
+  updateProject: (id: string, body: { name?: string; context?: string; defaultVocalsEnabled?: boolean }) =>
+    request<{ project: Project }>(`/api/projects/${enc(id)}`, { method: 'PUT', json: body }).then((d) => d.project),
+  unlinkProject: (id: string) => request(`/api/projects/${enc(id)}`, { method: 'DELETE' }),
 
-  async createProject(name: string, context?: string, defaultVocalsEnabled?: boolean): Promise<Project> {
-    const res = await fetch(`${API_BASE}/projects`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, context, defaultVocalsEnabled }),
-    });
-    if (!res.ok) throw new Error('Failed to create project');
-    const data = await res.json();
-    return data.project;
-  },
+  tracks: (id: string) => request<{ tracks: AudioTrack[] }>(`/api/projects/${enc(id)}/tracks`).then((d) => d.tracks),
+  history: (id: string) =>
+    request<{ history: GenerationHistory[] }>(`/api/projects/${enc(id)}/history`).then((d) => d.history),
+  audioUrl: (projectId: string, trackId: string) => `/api/projects/${enc(projectId)}/audio?trackId=${enc(trackId)}`,
 
-  async getProject(id: string): Promise<Project> {
-    const res = await fetch(`${API_BASE}/projects/${id}`);
-    if (!res.ok) throw new Error('Failed to fetch project');
-    const data = await res.json();
-    return data.project;
-  },
+  folders: (id: string) => request<{ tree: FolderNode }>(`/api/projects/${enc(id)}/folders`).then((d) => d.tree),
+  createFolder: (id: string, parent: string, name: string) =>
+    request(`/api/projects/${enc(id)}/folders`, { method: 'POST', json: { parent, name } }),
+  renameFolder: (id: string, path: string, newName: string) =>
+    request(`/api/projects/${enc(id)}/folders`, { method: 'PATCH', json: { path, newName } }),
+  deleteFolder: (id: string, path: string, recursive: boolean) =>
+    request(`/api/projects/${enc(id)}/folders?path=${enc(path)}&recursive=${recursive}`, { method: 'DELETE' }),
 
-  async updateProject(id: string, updates: Partial<Project>): Promise<Project> {
-    const res = await fetch(`${API_BASE}/projects/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
-    if (!res.ok) throw new Error('Failed to update project');
-    const data = await res.json();
-    return data.project;
-  },
+  previewManifest: (projectId: string, manifestPath?: string) =>
+    request<ManifestPreview>('/api/manifest/preview', { method: 'POST', json: { projectId, manifestPath } }),
+  applyManifest: (projectId: string, manifestPath?: string) =>
+    request<ManifestPreview & { project: Project }>('/api/manifest/apply', { method: 'POST', json: { projectId, manifestPath } }),
+  unlinkManifest: (projectId: string) =>
+    request<{ project: Project }>(`/api/projects/${enc(projectId)}/manifest`, { method: 'DELETE' }).then((d) => d.project),
 
-  async getProjectTracks(id: string): Promise<AudioTrack[]> {
-    const res = await fetch(`${API_BASE}/projects/${id}/tracks`);
-    if (!res.ok) throw new Error('Failed to fetch tracks');
-    const data = await res.json();
-    return data.tracks;
-  },
-
-  async getProjectHistory(id: string): Promise<GenerationHistory[]> {
-    const res = await fetch(`${API_BASE}/projects/${id}/history`);
-    if (!res.ok) throw new Error('Failed to fetch history');
-    const data = await res.json();
-    return data.history;
-  },
-
-  async getProviders(): Promise<Provider[]> {
-    const res = await fetch(`${API_BASE}/providers`);
-    if (!res.ok) throw new Error('Failed to fetch providers');
-    const data = await res.json();
-    return data.providers;
-  },
-
-  async generate(params: {
+  generate: (body: {
     projectId: string;
-    providerId: string;
     prompt: string;
-    vocalsEnabled?: boolean;
+    vocalsEnabled: boolean;
     duration?: number;
-    referenceTrackPath?: string;
-    outputFolder?: string;
-    outputName?: string;
-  }): Promise<{
-    success: boolean;
-    generationId: string;
-    outputPath: string;
-    lyrics?: string;
-    referenceDescription?: string;
-  }> {
-    const res = await fetch(`${API_BASE}/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.message || 'Generation failed');
-    }
-    return res.json();
-  },
+    referenceTrackId?: string;
+    outputFolder: string;
+  }) => request<{ entry: GenerationHistory }>('/api/generate', { method: 'POST', json: body }).then((d) => d.entry),
 };

@@ -1,84 +1,85 @@
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { AudioTrack } from '../api';
+import { SOUND_TYPES, api, type AudioTrack, type SoundType } from '../api';
 import { AudioPlayer } from './AudioPlayer';
 
-interface TrackListProps {
+interface Props {
+  projectId: string;
   tracks: AudioTrack[];
-  selectedTrack: AudioTrack | null;
-  onSelectTrack: (track: AudioTrack) => void;
-  onSetReference: (track: AudioTrack) => void;
+  selectedFolder: string;
+  selectedTrackId: string | null;
+  onSelect: (track: AudioTrack) => void;
+  onUseAsBase: (track: AudioTrack) => void;
 }
 
-export function TrackList({
-  tracks,
-  selectedTrack,
-  onSelectTrack,
-  onSetReference,
-}: TrackListProps) {
+export function TrackList({ projectId, tracks, selectedFolder, selectedTrackId, onSelect, onUseAsBase }: Props) {
   const { t } = useTranslation();
+  const [filter, setFilter] = useState<SoundType | 'ALL'>('ALL');
 
-  if (tracks.length === 0) {
-    return (
-      <div style={{ padding: '20px' }}>
-        <p style={{ color: '#666' }}>{t('noTracks')}</p>
-      </div>
-    );
-  }
+  const visible = useMemo(
+    () =>
+      tracks.filter((track) => {
+        if (filter !== 'ALL' && track.type !== filter) return false;
+        if (selectedFolder && track.source === 'local') {
+          return track.folder === selectedFolder || track.folder.startsWith(`${selectedFolder}/`);
+        }
+        return true;
+      }),
+    [tracks, filter, selectedFolder]
+  );
 
-  const groupedTracks = tracks.reduce((acc, track) => {
-    if (!acc[track.type]) {
-      acc[track.type] = [];
-    }
-    acc[track.type].push(track);
-    return acc;
-  }, {} as Record<string, AudioTrack[]>);
+  const grouped = SOUND_TYPES.map((type) => ({ type, items: visible.filter((tr) => tr.type === type) })).filter(
+    (g) => g.items.length > 0
+  );
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h3>{t('tracks')}</h3>
-      {Object.entries(groupedTracks).map(([type, typeTracks]) => (
-        <div key={type} style={{ marginBottom: '20px' }}>
-          <h4 style={{ marginBottom: '10px', color: '#666' }}>{type}</h4>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {typeTracks.map((track) => (
-              <div
-                key={track.id}
-                style={{
-                  padding: '10px',
-                  background: selectedTrack?.id === track.id ? '#e3f2fd' : '#f9f9f9',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '10px',
-                  }}
-                >
+    <section className="panel tracks">
+      <div className="panel-header">
+        <h3>{t('tracks')}</h3>
+        <div className="chips">
+          {(['ALL', ...SOUND_TYPES] as const).map((type) => (
+            <button key={type} className={`chip ${filter === type ? 'active' : ''}`} onClick={() => setFilter(type)}>
+              {type === 'ALL' ? t('filterAll') : type}
+            </button>
+          ))}
+        </div>
+      </div>
+      {grouped.length === 0 && <p className="muted">{t('noTracks')}</p>}
+      {grouped.map((group) => (
+        <div key={group.type} className="track-group">
+          <h4>
+            {group.type} <span className="muted">({group.items.length})</span>
+          </h4>
+          {group.items.map((track) => {
+            const selected = track.id === selectedTrackId;
+            return (
+              <div key={track.id} className={`track ${selected ? 'selected' : ''}`}>
+                <div className="track-row" onClick={() => onSelect(track)}>
                   <div>
-                    <div style={{ fontWeight: 'bold' }}>{track.name}</div>
-                    <div style={{ fontSize: '12px', color: '#666' }}>{track.folder}</div>
+                    <div className="track-name">{track.name}</div>
+                    <div className="muted small">
+                      {track.folder || '/'} · {track.source === 'manifest' ? t('sourceManifest') : t('sourceLocal')}
+                      {track.isGenerated && ` · ${t('generated')}`}
+                      {track.exists === false && <span className="error-text"> · {t('missingFile')}</span>}
+                    </div>
                   </div>
-                  <button onClick={() => onSetReference(track)} style={{ fontSize: '12px' }}>
-                    {t('useAsReference')}
+                  <button
+                    className="secondary small"
+                    disabled={track.exists === false}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUseAsBase(track);
+                    }}
+                  >
+                    {t('useAsBase')}
                   </button>
                 </div>
-                {selectedTrack?.id === track.id && (
-                  <AudioPlayer audioPath={`file://${track.path}`} />
-                )}
-                {selectedTrack?.id !== track.id && (
-                  <button onClick={() => onSelectTrack(track)} style={{ width: '100%' }}>
-                    {t('play')}
-                  </button>
-                )}
+                {selected && track.exists !== false && <AudioPlayer url={api.audioUrl(projectId, track.id)} />}
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       ))}
-    </div>
+    </section>
   );
 }

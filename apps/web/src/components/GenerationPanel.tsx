@@ -1,174 +1,129 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Project, Provider, AudioTrack } from '../api';
+import type { AudioTrack, Health, Project } from '../api';
 
-interface GenerationPanelProps {
+export interface GenerateInput {
+  prompt: string;
+  vocalsEnabled: boolean;
+  duration?: number;
+  referenceTrackId?: string;
+  outputFolder: string;
+}
+
+interface Props {
   project: Project;
-  providers: Provider[];
-  referenceTrack: AudioTrack | null;
-  onGenerate: (params: {
-    providerId: string;
-    prompt: string;
-    vocalsEnabled: boolean;
-    duration?: number;
-    referenceTrackPath?: string;
-    outputFolder: string;
-  }) => Promise<void>;
-  onClearReference: () => void;
+  health: Health | null;
+  folders: string[];
+  defaultFolder: string;
+  selectedTrack: AudioTrack | null;
+  useReference: boolean;
+  onUseReferenceChange: (value: boolean) => void;
+  onGenerate: (input: GenerateInput) => Promise<string>;
 }
 
 export function GenerationPanel({
   project,
-  providers,
-  referenceTrack,
+  health,
+  folders,
+  defaultFolder,
+  selectedTrack,
+  useReference,
+  onUseReferenceChange,
   onGenerate,
-  onClearReference,
-}: GenerationPanelProps) {
+}: Props) {
   const { t } = useTranslation();
   const [prompt, setPrompt] = useState('');
-  const [vocalsEnabled, setVocalsEnabled] = useState(project.defaultVocalsEnabled);
-  const [duration, setDuration] = useState<number | undefined>(undefined);
-  const [outputFolder, setOutputFolder] = useState('SOUNDTRACK');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedProviderId, setSelectedProviderId] = useState(providers[0]?.id || '');
+  const [vocals, setVocals] = useState(project.defaultVocalsEnabled);
+  const [duration, setDuration] = useState('');
+  const [outputFolder, setOutputFolder] = useState(defaultFolder || 'SOUNDTRACK');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const handleGenerate = async () => {
-    if (!prompt.trim() || !selectedProviderId) return;
+  useEffect(() => {
+    setVocals(project.defaultVocalsEnabled);
+    setResult(null);
+  }, [project.id, project.defaultVocalsEnabled]);
 
-    setIsGenerating(true);
+  useEffect(() => {
+    if (defaultFolder) setOutputFolder(defaultFolder);
+  }, [defaultFolder]);
+
+  const available = health?.generation.available ?? false;
+  const referenceReady = useReference && selectedTrack && selectedTrack.exists !== false;
+
+  const submit = async () => {
+    setBusy(true);
+    setResult(null);
     try {
-      await onGenerate({
-        providerId: selectedProviderId,
+      const file = await onGenerate({
         prompt,
-        vocalsEnabled,
-        duration,
-        referenceTrackPath: referenceTrack?.path,
+        vocalsEnabled: vocals,
+        duration: duration ? Number(duration) : undefined,
+        referenceTrackId: referenceReady ? selectedTrack.id : undefined,
         outputFolder,
       });
+      setResult({ ok: true, text: t('generationDone', { file }) });
       setPrompt('');
-    } catch (error) {
-      console.error('Generation failed:', error);
-      alert(`${t('generationFailed')}: ${error instanceof Error ? error.message : String(error)}`);
+    } catch (e) {
+      setResult({ ok: false, text: `${t('errorPrefix')}: ${(e as Error).message}` });
     } finally {
-      setIsGenerating(false);
+      setBusy(false);
     }
   };
 
-  if (providers.length === 0) {
-    return (
-      <div style={{ padding: '20px' }}>
-        <p style={{ color: 'red' }}>{t('noProviders')}</p>
-      </div>
-    );
-  }
-
-  const selectedProvider = providers.find(p => p.id === selectedProviderId);
-
   return (
-    <div style={{ padding: '20px' }}>
+    <section className="panel">
       <h3>{t('generate')}</h3>
+      {health?.generation.model && (
+        <p className="muted small">
+          {t('model')}: {health.generation.model}
+        </p>
+      )}
+      <label>
+        {t('prompt')}
+        <textarea value={prompt} placeholder={t('promptPlaceholder')} onChange={(e) => setPrompt(e.target.value)} disabled={busy} rows={4} />
+      </label>
+      {project.context && <p className="muted small">+ {project.context}</p>}
 
-      <div style={{ marginBottom: '10px' }}>
-        <label style={{ display: 'block', marginBottom: '5px' }}>Provider</label>
-        <select
-          value={selectedProviderId}
-          onChange={(e) => setSelectedProviderId(e.target.value)}
-          style={{ width: '100%', padding: '8px' }}
-        >
-          {providers.map((provider) => (
-            <option key={provider.id} value={provider.id}>
-              {provider.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      <label className="switch">
+        <input type="checkbox" checked={vocals} onChange={(e) => setVocals(e.target.checked)} disabled={busy} />
+        <span>
+          {t('vocals')} <span className="muted">({vocals ? t('withVocals') : t('instrumentalOnly')})</span>
+        </span>
+      </label>
 
-      <div style={{ marginBottom: '10px' }}>
-        <label style={{ display: 'block', marginBottom: '5px' }}>{t('prompt')}</label>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder={t('promptPlaceholder')}
-          style={{ width: '100%', padding: '8px', minHeight: '80px' }}
-          disabled={isGenerating}
-        />
-      </div>
-
-      {referenceTrack && (
-        <div
-          style={{
-            marginBottom: '10px',
-            padding: '10px',
-            background: '#fff3cd',
-            border: '1px solid #ffc107',
-            borderRadius: '4px',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <strong>{t('referenceTrack')}:</strong> {referenceTrack.name}
-            </div>
-            <button onClick={onClearReference} disabled={isGenerating}>
-              {t('clearReference')}
-            </button>
-          </div>
-          <div style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
-            This will generate a variant based on the reference track's characteristics
-          </div>
+      <label className="switch">
+        <input type="checkbox" checked={useReference} onChange={(e) => onUseReferenceChange(e.target.checked)} disabled={busy} />
+        <span>{t('useReference')}</span>
+      </label>
+      {useReference && (
+        <div className="banner info small">
+          {selectedTrack ? <strong>{selectedTrack.name}</strong> : t('noTrackSelected')}
+          <div>{t('referenceHelp')}</div>
         </div>
       )}
 
-      {selectedProvider?.capabilities.supportsVocals && (
-        <div style={{ marginBottom: '10px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <input
-              type="checkbox"
-              checked={vocalsEnabled}
-              onChange={(e) => setVocalsEnabled(e.target.checked)}
-              disabled={isGenerating}
-            />
-            {t('vocalsEnabled')}
-          </label>
-        </div>
-      )}
-
-      <div style={{ marginBottom: '10px' }}>
-        <label style={{ display: 'block', marginBottom: '5px' }}>{t('duration')}</label>
-        <input
-          type="number"
-          value={duration || ''}
-          onChange={(e) => setDuration(e.target.value ? parseInt(e.target.value, 10) : undefined)}
-          placeholder="Optional"
-          min="10"
-          max={selectedProvider?.capabilities.maxDurationSeconds || 180}
-          style={{ width: '100%', padding: '8px' }}
-          disabled={isGenerating}
-        />
+      <div className="row">
+        <label>
+          {t('duration')}
+          <input type="number" min={5} max={240} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy} />
+        </label>
+        <label>
+          {t('outputFolder')}
+          <select value={outputFolder} onChange={(e) => setOutputFolder(e.target.value)} disabled={busy}>
+            {folders.map((f) => (
+              <option key={f} value={f}>
+                {f || '/'}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      <div style={{ marginBottom: '10px' }}>
-        <label style={{ display: 'block', marginBottom: '5px' }}>{t('outputFolder')}</label>
-        <select
-          value={outputFolder}
-          onChange={(e) => setOutputFolder(e.target.value)}
-          style={{ width: '100%', padding: '8px' }}
-          disabled={isGenerating}
-        >
-          <option value="SOUNDTRACK">SOUNDTRACK</option>
-          <option value="SFX">SFX</option>
-          <option value="VO">VO</option>
-          <option value="AMBIENCE">AMBIENCE</option>
-          <option value="OTHER">OTHER</option>
-        </select>
-      </div>
-
-      <button
-        onClick={handleGenerate}
-        disabled={isGenerating || !prompt.trim()}
-        style={{ width: '100%', padding: '10px' }}
-      >
-        {isGenerating ? t('generating') : t('generate')}
+      <button className="full" onClick={() => void submit()} disabled={!available || busy || !prompt.trim() || Boolean(useReference && !referenceReady)}>
+        {busy ? t('generating') : t('generate')}
       </button>
-    </div>
+      {result && <p className={result.ok ? 'ok-text' : 'error-text'}>{result.text}</p>}
+    </section>
   );
 }
