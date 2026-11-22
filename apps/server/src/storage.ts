@@ -67,7 +67,7 @@ export class Storage {
     return [...this.allowedRoots];
   }
 
-  private validatePath(targetPath: string): void {
+  validatePath(targetPath: string): void {
     validatePathSafety(targetPath, this.allowedRoots);
   }
 

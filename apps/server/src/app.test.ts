@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm, readFile, access } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { ProviderRegistry, type MusicProvider } from '@loopsmith/providers';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
+import { AudioTools } from './audio-length.js';
 
 /** Builds a tiny valid PCM WAV file (mono, 8 kHz, silence). */
 function tinyWav(samples = 800): Buffer {
@@ -255,6 +257,85 @@ describe('generation with a fake provider', () => {
     const tracks = (await app.inject({ method: 'GET', url: `/api/projects/${project.id}/tracks`, headers: HOST })).json().tracks;
     expect(tracks.filter((t: { isGenerated: boolean }) => t.isGenerated)).toHaveLength(2);
 
+    await app.close();
+    await rm(tmp, { recursive: true, force: true });
+  });
+});
+
+const HAS_FFMPEG = spawnSync('ffmpeg', ['-version'], { windowsHide: true }).status === 0;
+
+describe('duration enforcement', () => {
+  async function setup(audioTools: AudioTools, env: Record<string, string> = {}) {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'loopsmith-trim-'));
+    const fake: MusicProvider = {
+      id: 'fake',
+      name: 'Fake',
+      model: 'fake-1',
+      capabilities: { supportsInstrumental: true, supportsVocals: true, supportsReferenceAudio: false, maxDurationSeconds: 60, outputFormats: ['wav'] },
+      async generate() {
+        // 4 seconds, much longer than requested, like Lyria ignoring the length hint.
+        return { audioData: tinyWav(32000), format: 'wav', structure: '[[A0]]' };
+      },
+    };
+    const registry = new ProviderRegistry();
+    registry.registerProvider(fake);
+    const app = await buildApp(loadConfig({ LOOPSMITH_ROOTS: './data', ...env }, tmp), { logger: false, providerRegistry: registry, audioTools });
+    const { project } = (await app.inject({ method: 'POST', url: '/api/projects', headers: HOST, payload: { name: 'Trim' } })).json();
+    return { tmp, app, project };
+  }
+
+  it('trims to the requested seconds, keeps the original hidden and records both', async () => {
+    const { tmp, app, project } = await setup(new AudioTools(false));
+    const res = await app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'jingle', duration: 2 } });
+    expect(res.statusCode).toBe(201);
+    const { entry } = res.json();
+    expect(entry.audio).toMatchObject({ requestedSeconds: 2, generatedSeconds: 4, finalSeconds: 2, trimmed: true, trimMethod: 'js' });
+    expect(entry.structure).toBe('[[A0]]');
+    expect(entry.lyrics).toBeUndefined();
+    await access(entry.audio.untrimmedPath);
+    expect(entry.audio.untrimmedPath).toContain('.loopsmith-untrimmed');
+    const tracks = (await app.inject({ method: 'GET', url: `/api/projects/${project.id}/tracks`, headers: HOST })).json().tracks;
+    expect(tracks).toHaveLength(1);
+
+    const untouched = await app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'long', duration: 30 } });
+    expect(untouched.json().entry.audio).toMatchObject({ requestedSeconds: 30, generatedSeconds: 4, trimmed: false });
+    await app.close();
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it('can drop the original and can be turned off', async () => {
+    const off = await setup(new AudioTools(false), { LOOPSMITH_TRIM_TO_DURATION: 'false' });
+    const a = (await off.app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: off.project.id, prompt: 'x', duration: 2 } })).json();
+    expect(a.entry.audio).toMatchObject({ generatedSeconds: 4, trimmed: false });
+    await off.app.close();
+    await rm(off.tmp, { recursive: true, force: true });
+
+    const noKeep = await setup(new AudioTools(false), { LOOPSMITH_KEEP_UNTRIMMED: 'false' });
+    const b = (await noKeep.app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: noKeep.project.id, prompt: 'x', duration: 2 } })).json();
+    expect(b.entry.audio).toMatchObject({ finalSeconds: 2, trimmed: true });
+    expect(b.entry.audio.untrimmedPath).toBeUndefined();
+    await noKeep.app.close();
+    await rm(noKeep.tmp, { recursive: true, force: true });
+  });
+
+  it.skipIf(!HAS_FFMPEG)('uses ffmpeg with a fade-out when it is installed', async () => {
+    const { tmp, app, project } = await setup(new AudioTools('ffmpeg'));
+    const { entry } = (await app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'x', duration: 1.5 } })).json();
+    expect(entry.audio.trimMethod).toBe('ffmpeg');
+    expect(entry.audio.finalSeconds).toBeCloseTo(1.5, 1);
+    expect(entry.audio.fadeOutSeconds).toBeGreaterThan(0);
+    await app.close();
+    await rm(tmp, { recursive: true, force: true });
+  });
+});
+
+describe('unsupported LYRIA_MODEL', () => {
+  it('reports the realtime model as a configuration error instead of crashing', async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'loopsmith-model-'));
+    const app = await buildApp(loadConfig({ LOOPSMITH_ROOTS: './data', GEMINI_API_KEY: 'test-key', LYRIA_MODEL: 'lyria-realtime-exp' }, tmp), { logger: false });
+    const health = (await app.inject({ method: 'GET', url: '/api/health', headers: HOST })).json();
+    expect(health.generation).toMatchObject({ available: false, reason: 'PROVIDER_CONFIG_ERROR' });
+    expect(health.generation.message).toContain('lyria-3.5');
     await app.close();
     await rm(tmp, { recursive: true, force: true });
   });

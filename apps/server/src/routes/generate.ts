@@ -1,10 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { nanoid } from 'nanoid';
+import { rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import type { GenerationHistory } from '@loopsmith/core';
+import type { GeneratedAudioInfo, GenerationHistory } from '@loopsmith/core';
 import { toSafeName } from '@loopsmith/core';
 import type { ProviderRegistry } from '@loopsmith/providers';
 import { HttpError, toPosix, type Storage } from '../storage.js';
+import type { AudioTools } from '../audio-length.js';
 import { resolveTrackPath } from '../manifest-service.js';
 
 export const API_KEY_MISSING_MESSAGE =
@@ -35,9 +37,71 @@ export function composePrompt(prompt: string, context?: string, referenceDescrip
   return parts.join('\n\n');
 }
 
-export const generateRoutes: FastifyPluginAsync<{ storage: Storage; providerRegistry: ProviderRegistry }> = async (
+export interface TrimOptions {
+  enabled: boolean;
+  keepUntrimmed: boolean;
+  fadeOutSeconds: number;
+}
+
+/** Hidden project folder (skipped by the track scanner) that keeps the untouched model output. */
+export const UNTRIMMED_DIR = '.loopsmith-untrimmed';
+/** Outputs up to this many seconds longer than requested are kept as they are. */
+const TRIM_TOLERANCE_SECONDS = 0.5;
+
+export interface GenerateRoutesOptions {
+  storage: Storage;
+  providerRegistry: ProviderRegistry;
+  audioTools?: AudioTools;
+  trim?: TrimOptions;
+}
+
+const round = (n: number | undefined) => (n === undefined ? undefined : Math.round(n * 100) / 100);
+
+/**
+ * Lyria has no duration parameter, so a requested duration is enforced here: when the file is
+ * longer than asked, it is cut to that length with a short fade-out. The original can be kept.
+ */
+async function enforceDuration(
+  storage: Storage,
+  projectPath: string,
+  outputPath: string,
+  requestedSeconds: number | undefined,
+  audioTools: AudioTools | undefined,
+  trim: TrimOptions | undefined
+): Promise<GeneratedAudioInfo> {
+  const generatedSeconds = audioTools ? await audioTools.measure(outputPath).catch(() => undefined) : undefined;
+  const info: GeneratedAudioInfo = { requestedSeconds, generatedSeconds: round(generatedSeconds), finalSeconds: round(generatedSeconds), trimmed: false };
+  if (!requestedSeconds || !audioTools || !trim?.enabled) return info;
+  if (generatedSeconds === undefined) return { ...info, note: 'Could not measure the generated audio; it was not trimmed.' };
+  if (generatedSeconds <= requestedSeconds + TRIM_TOLERANCE_SECONDS) return info;
+
+  const name = path.basename(outputPath);
+  const untrimmedPath = path.join(projectPath, UNTRIMMED_DIR, name);
+  storage.validatePath(untrimmedPath);
+  await storage.ensureDir(path.dirname(untrimmedPath));
+  await rename(outputPath, untrimmedPath);
+  try {
+    const result = await audioTools.trim(untrimmedPath, outputPath, requestedSeconds, trim.fadeOutSeconds);
+    const finalSeconds = await audioTools.measure(outputPath).catch(() => undefined);
+    if (!trim.keepUntrimmed) await rm(untrimmedPath, { force: true });
+    return {
+      ...info,
+      finalSeconds: round(finalSeconds),
+      trimmed: true,
+      trimMethod: result.method,
+      fadeOutSeconds: round(result.fadeOutSeconds),
+      ...(trim.keepUntrimmed ? { untrimmedPath } : {}),
+    };
+  } catch (error) {
+    await rm(outputPath, { force: true });
+    await rename(untrimmedPath, outputPath);
+    return { ...info, note: `Trimming failed, kept the full file: ${(error as Error).message}` };
+  }
+}
+
+export const generateRoutes: FastifyPluginAsync<GenerateRoutesOptions> = async (
   fastify,
-  { storage, providerRegistry }
+  { storage, providerRegistry, audioTools, trim }
 ) => {
   fastify.get('/providers', async () => ({
     providers: providerRegistry.listProviders().map((p) => ({
@@ -59,6 +123,9 @@ export const generateRoutes: FastifyPluginAsync<{ storage: Storage; providerRegi
     const provider = body.providerId ? providerRegistry.getProvider(body.providerId) : providerRegistry.getDefaultProvider();
     if (!provider) {
       if (providerRegistry.listProviders().length === 0) {
+        if (providerRegistry.errors.length > 0) {
+          throw new HttpError(503, providerRegistry.errors[0]!, 'PROVIDER_CONFIG_ERROR');
+        }
         throw new HttpError(503, API_KEY_MISSING_MESSAGE, 'API_KEY_MISSING');
       }
       throw new HttpError(400, 'Provider not found', 'PROVIDER_NOT_FOUND');
@@ -102,6 +169,8 @@ export const generateRoutes: FastifyPluginAsync<{ storage: Storage; providerRegi
       outputPath = path.join(outputDir, `${baseName}_${stamp}_${i}.${result.format}`);
     }
     await storage.writeAudioFile(outputPath, result.audioData);
+    const audio = await enforceDuration(storage, project.path, outputPath, duration, audioTools, trim);
+    if (audio.note) request.log.warn(audio.note);
 
     const entry: GenerationHistory = {
       id: nanoid(10),
@@ -114,6 +183,8 @@ export const generateRoutes: FastifyPluginAsync<{ storage: Storage; providerRegi
       referenceTrackId: body.referenceTrackId,
       referenceDescription,
       lyrics: result.lyrics,
+      structure: result.structure,
+      audio,
       timestamp: new Date().toISOString(),
       outputPath,
       outputTrackId: `local:${toPosix(path.relative(project.path, outputPath))}`,

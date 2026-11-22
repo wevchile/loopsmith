@@ -14,6 +14,24 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface GeneratedAudioInfo {
+  /** Length asked for in the duration field (seconds). */
+  requestedSeconds?: number;
+  /** Length the model actually returned (seconds). */
+  generatedSeconds?: number;
+  /** Length of the saved file (seconds). */
+  finalSeconds?: number;
+  /** True when the saved file was cut to the requested length. */
+  trimmed: boolean;
+  /** "ffmpeg" (re-encoded with a fade-out) or "js" (pure JavaScript cut). */
+  trimMethod?: 'ffmpeg' | 'js';
+  fadeOutSeconds?: number;
+  /** Untouched model output, kept next to the project in a hidden folder. */
+  untrimmedPath?: string;
+  /** Why trimming was skipped or failed, if it was. */
+  note?: string;
+}
+
 export interface GenerationHistory {
   id: string;
   projectId: string;
@@ -26,6 +44,10 @@ export interface GenerationHistory {
   referenceTrackId?: string;
   referenceDescription?: string;
   lyrics?: string;
+  /** Raw structure text returned by the model (for example "[[A0]] [[B1]]"). */
+  structure?: string;
+  /** Requested vs generated vs saved length, and how the file was trimmed. */
+  audio?: GeneratedAudioInfo;
   timestamp: string;
   /** Absolute path of the generated file. */
   outputPath: string;
@@ -90,6 +112,8 @@ export interface ProviderCapabilities {
   supportsVocals: boolean;
   supportsReferenceAudio: boolean;
   maxDurationSeconds: number;
+  /** Set when the model always returns this many seconds, whatever the prompt says. */
+  fixedDurationSeconds?: number;
   outputFormats: string[];
 }
 
@@ -113,6 +137,9 @@ export interface GenerateRequest {
 export interface GenerateResult {
   audioData: Buffer;
   format: string;
+  /** Real lyrics only (section markers such as "[[A0]]" removed). */
   lyrics?: string;
+  /** Raw structure text returned by the model (section markers or JSON). */
+  structure?: string;
   metadata?: Record<string, unknown>;
 }

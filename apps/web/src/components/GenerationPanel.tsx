@@ -106,7 +106,14 @@ export function GenerationPanel({
       <div className="row">
         <label>
           {t('duration')}
-          <input type="number" min={5} max={240} value={duration} onChange={(e) => setDuration(e.target.value)} disabled={busy} />
+          <input
+            type="number"
+            min={1}
+            max={health?.generation.maxDurationSeconds || 240}
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            disabled={busy}
+          />
         </label>
         <label>
           {t('outputFolder')}
@@ -119,6 +126,15 @@ export function GenerationPanel({
           </select>
         </label>
       </div>
+
+      {health?.generation.available && (
+        <p className="muted small">
+          {health.generation.fixedDurationSeconds
+            ? t('durationFixed', { seconds: health.generation.fixedDurationSeconds })
+            : t('durationHint')}
+          {health.generation.trimToDuration !== false && duration ? ` ${t('durationTrim', { seconds: duration })}` : ''}
+        </p>
+      )}
 
       <button className="full" onClick={() => void submit()} disabled={!available || busy || !prompt.trim() || Boolean(useReference && !referenceReady)}>
         {busy ? t('generating') : t('generate')}

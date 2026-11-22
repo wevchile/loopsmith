@@ -35,6 +35,16 @@ export interface GenerationHistory {
   referenceTrackId?: string;
   referenceDescription?: string;
   lyrics?: string;
+  structure?: string;
+  audio?: {
+    requestedSeconds?: number;
+    generatedSeconds?: number;
+    finalSeconds?: number;
+    trimmed: boolean;
+    trimMethod?: 'ffmpeg' | 'js';
+    untrimmedPath?: string;
+    note?: string;
+  };
   timestamp: string;
   outputPath: string;
   outputTrackId?: string;
@@ -49,7 +59,16 @@ export interface FolderNode {
 export interface Health {
   status: string;
   apiKeyConfigured: boolean;
-  generation: { available: boolean; model?: string; providerId?: string; reason?: string; message?: string };
+  generation: {
+    available: boolean;
+    model?: string;
+    providerId?: string;
+    maxDurationSeconds?: number;
+    fixedDurationSeconds?: number;
+    trimToDuration?: boolean;
+    reason?: string;
+    message?: string;
+  };
   allowedRoots: string[];
 }
 

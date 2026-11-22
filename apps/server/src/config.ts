@@ -13,6 +13,19 @@ export interface Config {
   analysisModel: string;
   geminiApiVersion: string;
   outputFormat: 'mp3' | 'wav';
+  /** Cut generated audio to the requested duration (Lyria has no duration parameter). */
+  trimToDuration: boolean;
+  /** Keep the untouched model output in <project>/.loopsmith-untrimmed when trimming. */
+  keepUntrimmed: boolean;
+  fadeOutSeconds: number;
+  /** ffmpeg executable used for trimming; false disables it (pure JavaScript fallback). */
+  ffmpegPath: string | false;
+}
+
+function flag(value: string | undefined, fallback: boolean): boolean {
+  const v = value?.trim().toLowerCase();
+  if (!v) return fallback;
+  return !['0', 'false', 'no', 'off'].includes(v);
 }
 
 const PLACEHOLDER_KEYS = new Set(['', 'your_gemini_api_key_here', 'changeme']);
@@ -35,6 +48,8 @@ export function loadConfig(env: NodeJS.ProcessEnv, repoRoot: string): Config {
     ),
   ];
 
+  const fade = Number.parseFloat(env.LOOPSMITH_FADE_OUT_SECONDS || '1.5');
+  const ffmpegEnv = env.LOOPSMITH_FFMPEG?.trim();
   const port = Number.parseInt(env.LOOPSMITH_SERVER_PORT || '3001', 10);
 
   return {
@@ -47,5 +62,9 @@ export function loadConfig(env: NodeJS.ProcessEnv, repoRoot: string): Config {
     analysisModel: env.GEMINI_ANALYSIS_MODEL?.trim() || DEFAULT_ANALYSIS_MODEL,
     geminiApiVersion: env.GEMINI_API_VERSION?.trim() || DEFAULT_API_VERSION,
     outputFormat: env.LYRIA_OUTPUT_FORMAT?.trim().toLowerCase() === 'wav' ? 'wav' : 'mp3',
+    trimToDuration: flag(env.LOOPSMITH_TRIM_TO_DURATION, true),
+    keepUntrimmed: flag(env.LOOPSMITH_KEEP_UNTRIMMED, true),
+    fadeOutSeconds: Number.isFinite(fade) && fade >= 0 ? Math.min(fade, 10) : 1.5,
+    ffmpegPath: ffmpegEnv && ['false', 'off', 'none', '0'].includes(ffmpegEnv.toLowerCase()) ? false : ffmpegEnv || 'ffmpeg',
   };
 }

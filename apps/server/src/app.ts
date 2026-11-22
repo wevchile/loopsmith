@@ -1,15 +1,17 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { ProviderRegistry } from '@loopsmith/providers';
+import { LYRIA_MODELS, ProviderRegistry } from '@loopsmith/providers';
 import type { Config } from './config.js';
 import { HttpError, Storage } from './storage.js';
 import { projectsRoutes } from './routes/projects.js';
 import { generateRoutes, API_KEY_MISSING_MESSAGE } from './routes/generate.js';
 import { manifestRoutes } from './routes/manifest.js';
 import { audioRoutes } from './routes/audio.js';
+import { AudioTools } from './audio-length.js';
 
 export interface AppOptions {
   logger?: boolean;
   providerRegistry?: ProviderRegistry;
+  audioTools?: AudioTools;
 }
 
 const LOCAL_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
@@ -33,6 +35,8 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
       apiVersion: config.geminiApiVersion,
       outputFormat: config.outputFormat,
     });
+
+  const audioTools = options.audioTools ?? new AudioTools(config.ffmpegPath);
 
   const app = Fastify({
     logger: options.logger === false ? false : { level: 'info' },
@@ -86,8 +90,18 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
       status: 'ok',
       apiKeyConfigured: Boolean(config.geminiApiKey),
       generation: provider
-        ? { available: true, providerId: provider.id, model: provider.model }
-        : { available: false, reason: 'API_KEY_MISSING', message: API_KEY_MISSING_MESSAGE },
+        ? {
+            available: true,
+            providerId: provider.id,
+            model: provider.model,
+            maxDurationSeconds: provider.capabilities.maxDurationSeconds,
+            fixedDurationSeconds: provider.capabilities.fixedDurationSeconds,
+            trimToDuration: config.trimToDuration,
+          }
+        : providerRegistry.errors.length > 0
+          ? { available: false, reason: 'PROVIDER_CONFIG_ERROR', message: providerRegistry.errors[0] }
+          : { available: false, reason: 'API_KEY_MISSING', message: API_KEY_MISSING_MESSAGE },
+      lyriaModels: LYRIA_MODELS.map((m) => ({ id: m.id, status: m.status, supported: m.api === 'interactions' })),
       providers: providerRegistry.listProviders().map((p) => ({ id: p.id, name: p.name, model: p.model })),
       allowedRoots: config.allowedRoots,
     };
@@ -96,7 +110,13 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
   app.get('/api/health', health);
 
   await app.register(projectsRoutes, { prefix: '/api', storage });
-  await app.register(generateRoutes, { prefix: '/api', storage, providerRegistry });
+  await app.register(generateRoutes, {
+    prefix: '/api',
+    storage,
+    providerRegistry,
+    audioTools,
+    trim: { enabled: config.trimToDuration, keepUntrimmed: config.keepUntrimmed, fadeOutSeconds: config.fadeOutSeconds },
+  });
   await app.register(manifestRoutes, { prefix: '/api', storage });
   await app.register(audioRoutes, { prefix: '/api', storage });
 

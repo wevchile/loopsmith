@@ -23,6 +23,7 @@ The interface is in Spanish by default and can be switched to English.
 - **pnpm 10 or newer** (tested with pnpm 12.18): https://pnpm.io/installation
 - **Git** to clone the repository.
 - **A Gemini API key** for AI generation: https://aistudio.google.com/api-keys (optional to try the app; see "Running without an API key").
+- **ffmpeg** (optional, recommended): used to cut generated music to the requested duration with a fade-out. On Windows: `winget install Gyan.FFmpeg`. Without it Loopsmith uses a built-in cutter.
 
 ## Installation
 
@@ -74,8 +75,12 @@ So `pnpm install` works without running `pnpm approve-builds`. The lockfile is a
 | --- | --- | --- |
 | `GEMINI_API_KEY` | (empty) | Your key from https://aistudio.google.com/api-keys. Required only for generation. |
 | `GEMINI_API_VERSION` | `v1beta` | Gemini API version. Lyria is only served on `v1beta`; keep the default. |
-| `LYRIA_MODEL` | `lyria-3.5` | Lyria model. `lyria-3-clip-preview` makes 30 second clips. |
-| `LYRIA_OUTPUT_FORMAT` | `mp3` | `mp3` or `wav`. |
+| `LYRIA_MODEL` | `lyria-3.5` | Lyria model, see "Lyria models" below. |
+| `LYRIA_OUTPUT_FORMAT` | `mp3` | `mp3` or `wav` (`wav` only with `lyria-3.5`). |
+| `LOOPSMITH_TRIM_TO_DURATION` | `true` | Cut results longer than the duration field to that length, with a fade-out. |
+| `LOOPSMITH_KEEP_UNTRIMMED` | `true` | Keep the full model output in `<project>/.loopsmith-untrimmed`. |
+| `LOOPSMITH_FADE_OUT_SECONDS` | `1.5` | Fade-out length when trimming. |
+| `LOOPSMITH_FFMPEG` | `ffmpeg` | ffmpeg executable, or `off` to use the built-in cutter. |
 | `GEMINI_ANALYSIS_MODEL` | `gemini-3.6-flash` | Model that describes a base track for variants. |
 | `LOOPSMITH_ROOTS` | `./loopsmith-data` | Comma separated folders where projects live. Relative paths start at the repository folder. |
 | `LOOPSMITH_SERVER_PORT` | `3001` | API port (always bound to 127.0.0.1). |
@@ -173,12 +178,34 @@ Loopsmith uses the official [`@google/genai`](https://www.npmjs.com/package/@goo
 
 - **API version `v1beta` is required.** The SDK defaults to `v1`, where the API answers `404 Model 'lyria-3.5' not found`. Loopsmith creates the client with `apiVersion: 'v1beta'` (configurable with `GEMINI_API_VERSION`).
 
-- **Default model: `lyria-3.5`**, listed as Google's flagship (stable, no `-preview` suffix) music model in the [models list](https://ai.google.dev/gemini-api/docs/models). It creates full tracks of a couple of minutes at 44.1 kHz.
-- `lyria-3-clip-preview` creates 30 second clips and is useful to iterate quickly; set `LYRIA_MODEL=lyria-3-clip-preview` to use it.
-- **Lyria RealTime is not used**: it streams music live over a WebSocket, while Loopsmith creates and saves complete files. Lyria 3.5 covers that use case with a simpler request.
+### Lyria models
+
+Set `LYRIA_MODEL` in `.env` and restart. Status and prices from the Gemini API docs ([music generation](https://ai.google.dev/gemini-api/docs/music-generation), [models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [deprecations](https://ai.google.dev/gemini-api/docs/deprecations)), November 2026:
+
+| Model | Status | Length | Output | Price (paid tier) | Notes |
+| --- | --- | --- | --- | --- | --- |
+| `lyria-3.5` (default) | Stable | A couple of minutes, prompt hint only | MP3 or WAV, 44.1 kHz stereo | USD 0.08 per song | Flagship. Best structure and quality. |
+| `lyria-3-clip-preview` | Preview | Always 30 s | MP3, stereo | USD 0.04 per clip | Short clips and loops, faster. Good to iterate on prompts. |
+| `lyria-3-pro-preview` | Preview, previous generation | A couple of minutes | MP3, stereo | USD 0.08 per song | Google lists `lyria-3.5` as its replacement. |
+| `lyria-realtime-exp` | Experimental | Endless live stream | Raw PCM over WebSocket | - | Not supported: it streams live and cannot return a file. Loopsmith shows a configuration error if selected. |
+
+There is no free tier for Lyria. Every model above (except RealTime) is called the same way, with the Interactions API on `v1beta`. Unknown model ids are passed through the same way, so new Lyria models can be tried from `.env` without code changes.
+
+### Duration
+
+**Lyria has no duration parameter.** The Interactions API rejects fields such as `generation_config.duration` (`Unknown parameter`), the clip model is fixed at 30 seconds, and `lyria-3.5` and `lyria-3-pro-preview` ignore it in practice (in our tests, asking for 16 seconds in both the prompt and a timestamped structure returned 164 and 162 seconds). So Loopsmith does two things:
+
+1. It asks for the length in the prompt with a timestamped structure (for example `[0:00 - 0:16]`), the method the docs recommend.
+2. If the result is still longer than the duration field (by more than half a second), it **cuts it locally** to that length with a 1.5 second fade-out (ffmpeg when installed, otherwise a built-in cutter). The untouched file is kept in `<project>/.loopsmith-untrimmed/`, and the history entry records the requested, generated and final lengths.
+
+Leave the duration empty to keep whatever length Lyria returns. With `lyria-3-clip-preview` you get 30 seconds, so durations up to 30 seconds are cut from that clip.
+
+### Other notes
+
 - **Instrumental vs vocals**: Lyria has no separate "instrumental" parameter, so when vocals are off Loopsmith adds an explicit "Instrumental only, no vocals" instruction to the prompt, as recommended in the guide.
 - **Variants**: Lyria does not accept an audio file as input, so the "base track" option first asks a Gemini model to describe the track (genre, instruments, mood, tempo, key) and then sends that description plus your changes to Lyria.
 - Lyria only creates music. It works well for `SOUNDTRACK` and reasonably for `AMBIENCE`, not for real sound effects or voice lines. Those types are ready for future providers.
+- **Song structure is not lyrics**: Lyria returns a structure text with every track. For instrumentals it is only markers such as `[[A0]]` or `<instrumental>`; Loopsmith saves it as `structure` in the history and only shows real lyrics as lyrics.
 - Generation is billed by Google per request; check https://ai.google.dev/gemini-api/docs/pricing before generating a lot. All generated audio carries an inaudible SynthID watermark.
 
 ## Adding another AI provider

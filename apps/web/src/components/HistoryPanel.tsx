@@ -25,6 +25,19 @@ export function HistoryPanel({ history, onSelectTrack }: Props) {
                 {t('basedOn')} {h.referenceTrackId.replace(/^(local|manifest):/, '')}
               </div>
             )}
+            {h.audio?.finalSeconds !== undefined && (
+              <div className="small muted">
+                {h.audio.trimmed
+                  ? t('trimmedFrom', { final: h.audio.finalSeconds.toFixed(1), generated: h.audio.generatedSeconds?.toFixed(1) })
+                  : t('lengthSeconds', { seconds: h.audio.finalSeconds.toFixed(1) })}
+              </div>
+            )}
+            {h.lyrics && (
+              <details className="small" onClick={(e) => e.stopPropagation()}>
+                <summary>{t('lyrics')}</summary>
+                <pre className="lyrics">{h.lyrics}</pre>
+              </details>
+            )}
             <div className="small path">{h.outputTrackId?.replace(/^local:/, '') ?? h.outputPath}</div>
           </li>
         ))}

@@ -3,6 +3,8 @@ import { GeminiLyriaProvider } from './gemini-lyria.js';
 
 export class ProviderRegistry {
   private providers = new Map<string, MusicProvider>();
+  /** Configuration problems that prevented a provider from being registered (for example an unsupported LYRIA_MODEL). */
+  readonly errors: string[] = [];
 
   registerProvider(provider: MusicProvider): void {
     this.providers.set(provider.id, provider);
@@ -25,7 +27,11 @@ export class ProviderRegistry {
     const registry = new ProviderRegistry();
 
     if (config.apiKey) {
-      registry.registerProvider(new GeminiLyriaProvider(config));
+      try {
+        registry.registerProvider(new GeminiLyriaProvider(config));
+      } catch (error) {
+        registry.errors.push(error instanceof Error ? error.message : String(error));
+      }
     }
 
     return registry;
