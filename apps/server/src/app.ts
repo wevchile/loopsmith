@@ -37,6 +37,8 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
     ProviderRegistry.createDefault({
       apiKey: config.geminiApiKey,
       lyriaModel: config.lyriaModel,
+      lyriaModelShort: config.lyriaModelShort,
+      lyriaModelLong: config.lyriaModelLong,
       analysisModel: config.analysisModel,
       refineModel: config.refineModel,
       apiVersion: config.geminiApiVersion,
@@ -104,7 +106,17 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
             maxDurationSeconds: provider.capabilities.maxDurationSeconds,
             fixedDurationSeconds: provider.capabilities.fixedDurationSeconds,
             trimToDuration: config.trimToDuration,
-            promptRefine: { enabled: config.promptRefine && Boolean(provider.refinePrompt), model: config.refineModel },
+            models: {
+              short: provider.modelShort ?? provider.model,
+              long: provider.modelLong ?? provider.model,
+              override: provider.modelOverride,
+              shortMaxSeconds: provider.shortMaxSeconds,
+            },
+            promptMode: config.promptMode,
+            promptRefine: { enabled: Boolean(provider.refinePrompt), model: config.refineModel },
+            defaultLoopSeconds: config.defaultLoopSeconds,
+            loopSeamSeconds: config.loopSeamSeconds,
+            fadeOutSeconds: config.fadeOutSeconds,
           }
         : providerRegistry.errors.length > 0
           ? { available: false, reason: 'PROVIDER_CONFIG_ERROR', message: providerRegistry.errors[0] }
@@ -123,8 +135,14 @@ export async function buildApp(config: Config, options: AppOptions = {}): Promis
     storage,
     providerRegistry,
     audioTools,
-    promptRefine: config.promptRefine,
-    trim: { enabled: config.trimToDuration, keepUntrimmed: config.keepUntrimmed, fadeOutSeconds: config.fadeOutSeconds },
+    promptMode: config.promptMode,
+    defaultLoopSeconds: config.defaultLoopSeconds,
+    trim: {
+      enabled: config.trimToDuration,
+      keepUntrimmed: config.keepUntrimmed,
+      fadeOutSeconds: config.fadeOutSeconds,
+      seamSeconds: config.loopSeamSeconds,
+    },
   });
   await app.register(manifestRoutes, { prefix: '/api', storage });
   await app.register(aiTrackRoutes, { prefix: '/api', storage });

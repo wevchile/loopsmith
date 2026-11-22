@@ -13,7 +13,9 @@ The interface is in Spanish by default and can be switched to English.
 - **Replace original**: write a chosen AI track over its original in your local game repository. The original is first renamed to a numbered backup in the same folder (`soundtrack_autum.wav` becomes `soundtrack_autum_1.wav`), the format is converted with ffmpeg when needed, the manifest entry is updated, and every replacement can be reverted.
 - **AI track actions**: rename (the file on disk too), move to another folder, duplicate, delete (with confirmation), notes and tags. Any track, original or AI, can be downloaded.
 - **Project context (optional)**: a text such as "everything in retro 8-bit style" that is added to every prompt of the project.
-- **Generate music from a prompt** with Lyria. Files are saved locally in the folder you choose.
+- **Generate music from a prompt** with Lyria. Files are saved locally in the folder you choose. By default your prompt is sent verbatim inside a short fixed frame ("direct mode"); "Pulir con IA / Polish with AI" optionally lets Gemini polish it first.
+- **Seamless loops by default**: each track is an exact loop (16 s unless you set a duration) whose wrap point is crossfaded with the music Lyria played past it, saved as 16-bit 44.1 kHz WAV. Switch to "Con final / With ending" for a piece that ends with a fade-out. "Escuchar unión / Hear the seam" plays the end and the start back to back.
+- **Model by duration**: short loops use `lyria-3-clip-preview`, longer tracks `lyria-3.5` (configurable).
 - **Instrumental by default**: a switch allows vocals per generation, and each project has its own default.
 - **Variants from a base track**: switch on "use the selected track as the base", Gemini listens to it and describes it, and Lyria creates a new variant with your changes. The original file is never modified.
 - **Player**: play, pause, stop, loop, volume and waveform.
@@ -27,7 +29,7 @@ The interface is in Spanish by default and can be switched to English.
 - **pnpm 10 or newer** (tested with pnpm 12.18): https://pnpm.io/installation
 - **Git** to clone the repository.
 - **A Gemini API key** for AI generation: https://aistudio.google.com/api-keys (optional to try the app; see "Running without an API key").
-- **ffmpeg** (optional, recommended): used to cut generated music to the requested duration with a fade-out. On Windows: `winget install Gyan.FFmpeg`. Without it Loopsmith uses a built-in cutter.
+- **ffmpeg** (recommended): builds the seamless loops (and converts formats for "Replace original"). On Windows: `winget install Gyan.FFmpeg`. Without it Loopsmith falls back to a built-in cutter with a fade-out (no loop seam).
 
 ## Installation
 
@@ -79,13 +81,17 @@ So `pnpm install` works without running `pnpm approve-builds`. The lockfile is a
 | --- | --- | --- |
 | `GEMINI_API_KEY` | (empty) | Your key from https://aistudio.google.com/api-keys. Required only for generation. |
 | `GEMINI_API_VERSION` | `v1beta` | Gemini API version. Lyria is only served on `v1beta`; keep the default. |
-| `LYRIA_MODEL` | `lyria-3.5` | Lyria model, see "Lyria models" below. |
-| `LYRIA_OUTPUT_FORMAT` | `mp3` | `mp3` or `wav` (`wav` only with `lyria-3.5`). |
-| `LOOPSMITH_PROMPT_REFINE` | `true` | Rewrite each request into a detailed Lyria prompt with Gemini first. Can be switched off per generation. |
-| `LOOPSMITH_REFINE_MODEL` | `gemini-3.8-flash` | Gemini text model that writes the Lyria prompt. |
-| `LOOPSMITH_TRIM_TO_DURATION` | `true` | Cut results longer than the duration field to that length, with a fade-out. |
+| `LYRIA_MODEL_SHORT` | `lyria-3-clip-preview` | Model for loops and pieces up to 29 s. |
+| `LYRIA_MODEL_LONG` | `lyria-3.5` | Model for longer tracks and for pieces "with ending" without a duration. |
+| `LYRIA_MODEL` | (empty) | If set, this one model is used for every generation and the two above are ignored. See "Lyria models". |
+| `LYRIA_OUTPUT_FORMAT` | `mp3` | Format requested from Lyria: `mp3` or `wav` (`wav` only with `lyria-3.5`). Loops are always saved as WAV after processing. |
+| `LOOPSMITH_PROMPT_MODE` | `direct` | `direct`: your prompt verbatim inside a fixed frame. `refine`: "Pulir con IA" is on by default. Either way it can be switched per generation. |
+| `LOOPSMITH_REFINE_MODEL` | `gemini-3.8-flash` | Gemini text model used by "Pulir con IA". |
+| `LOOPSMITH_DEFAULT_LOOP_SECONDS` | `16` | Loop length when the duration field is empty. |
+| `LOOPSMITH_LOOP_SEAM_SECONDS` | `0.25` | Crossfade at the loop point. |
+| `LOOPSMITH_TRIM_TO_DURATION` | `true` | Enforce the duration locally (loop seam, or fade-out for "with ending"). `false` keeps whatever Lyria returns. |
 | `LOOPSMITH_KEEP_UNTRIMMED` | `true` | Keep the full model output in `<project>/.loopsmith-untrimmed`. |
-| `LOOPSMITH_FADE_OUT_SECONDS` | `1.5` | Fade-out length when trimming. |
+| `LOOPSMITH_FADE_OUT_SECONDS` | `1.5` | Fade-out length for pieces "with ending". |
 | `LOOPSMITH_FFMPEG` | `ffmpeg` | ffmpeg executable, or `off` to use the built-in cutter. |
 | `GEMINI_ANALYSIS_MODEL` | `gemini-3.6-flash` | Model that describes a base track for variants. |
 | `LOOPSMITH_ROOTS` | `./loopsmith-data` | Comma separated folders where projects live. Relative paths start at the repository folder. |
@@ -118,8 +124,8 @@ Everything except generation works without `GEMINI_API_KEY`: projects, folders, 
 
 1. **Create a project** with "Nuevo proyecto / New project". Give it a name and, optionally, a context such as `retro 8-bit, chiptune, fast tempo`. A folder is created in your first root with the five type folders.
 2. **Organize folders** with the folder bar above the library (new subfolder, rename, delete) or in Settings (gear icon) > Carpetas / Folders.
-3. **Generate**: write a prompt, keep "Allow vocals" off for instrumental music (default) or switch it on, choose where to save it and press Generate. The file appears in the sounds list and in the history.
-4. **Listen**: click a sound to open the player (play, pause, stop, loop, volume). Keyboard: arrow keys move the selection, Space plays or pauses, Escape deselects, `i` shows or hides the inspector and `,` opens Settings.
+3. **Generate**: write a prompt (in any language, as you would describe it), keep "Allow vocals" off for instrumental music (default) or switch it on, pick "Loop" (default for music and ambience) or "Con final" (default for SFX and VO), optionally set the duration (empty = 16 s loop), choose where to save it and press Generate. The file appears in the sounds list and in the history, where "Prompts" shows your prompt and the exact text sent to Lyria.
+4. **Listen**: click a sound to open the player (play, pause, stop, loop, volume, and "Escuchar unión" to hear the last 3 s followed by the first 3 s, the point where a loop restarts). Keyboard: arrow keys move the selection, Space plays or pauses, Escape deselects, `i` shows or hides the inspector and `,` opens Settings.
 5. **Review AI tracks**: mark each one as Candidata, Elegida or Descartada with the row icons or in the Track tab, link it to an original, add notes and tags, and filter the library by status. The "..." menu has rename, move, duplicate, link and delete.
 6. **Create a variant**: click "Use as base" on a sound (or switch on "Use the selected track as the base"), describe the changes ("faster and darker") and generate. A new file is created next to the others.
 7. **Link your game** (optional): open Settings > Manifiesto del juego / Game manifest, see the next section.
@@ -206,41 +212,45 @@ Loopsmith uses the official [`@google/genai`](https://www.npmjs.com/package/@goo
 
 ### Lyria models
 
-Set `LYRIA_MODEL` in `.env` and restart. Status and prices from the Gemini API docs ([music generation](https://ai.google.dev/gemini-api/docs/music-generation), [models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [deprecations](https://ai.google.dev/gemini-api/docs/deprecations)), November 2026:
+Loopsmith picks the model by duration: `LYRIA_MODEL_SHORT` (default `lyria-3-clip-preview`) for loops and pieces up to 29 seconds, `LYRIA_MODEL_LONG` (default `lyria-3.5`) for longer ones and for pieces "with ending" without a duration. Setting `LYRIA_MODEL` forces one model for everything. The panel shows which model the next generation will use. Status and prices from the Gemini API docs ([music generation](https://ai.google.dev/gemini-api/docs/music-generation), [models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [deprecations](https://ai.google.dev/gemini-api/docs/deprecations)), November 2026:
 
 | Model | Status | Length | Output | Price (paid tier) | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `lyria-3.5` (default) | Stable | A couple of minutes, prompt hint only | MP3 or WAV, 44.1 kHz stereo | USD 0.08 per song | Flagship. Best structure and quality. |
-| `lyria-3-clip-preview` | Preview | Always 30 s | MP3, stereo | USD 0.04 per clip | Short clips and loops, faster. Good to iterate on prompts. |
+| `lyria-3-clip-preview` (default short) | Preview | Always 30 s | MP3, stereo | USD 0.04 per clip | Short clips and loops, faster. 30 s covers loops up to 29 s plus the seam. |
+| `lyria-3.5` (default long) | Stable | A couple of minutes, prompt hint only | MP3 or WAV, 44.1 kHz stereo | USD 0.08 per song | Flagship. Best for full tracks. |
 | `lyria-3-pro-preview` | Preview, previous generation | A couple of minutes | MP3, stereo | USD 0.08 per song | Google lists `lyria-3.5` as its replacement. |
 | `lyria-realtime-exp` | Experimental | Endless live stream | Raw PCM over WebSocket | - | Not supported: it streams live and cannot return a file. Loopsmith shows a configuration error if selected. |
 
-There is no free tier for Lyria. Every model above (except RealTime) is called the same way, with the Interactions API on `v1beta`. Unknown model ids are passed through the same way, so new Lyria models can be tried from `.env` without code changes.
+There is no free tier for Lyria. Every model above (except RealTime) is called the same way, with the Interactions API on `v1beta`. Unknown model ids are passed through the same way, so new Lyria models can be tried from `.env` without code changes. The clip model is a preview: if Google changes or retires it, set `LYRIA_MODEL_SHORT=lyria-3.5`.
 
-### Prompt refinement
+### How the prompt is built
 
-Short prompts like "musica electronica para una discoteca" give Lyria little to work with. With `LOOPSMITH_PROMPT_REFINE=true` (the default), a Gemini text model (`LOOPSMITH_REFINE_MODEL`, default `gemini-3.8-flash`, the newest stable Flash model) first writes a detailed English prompt following the [Lyria prompt guide](https://ai.google.dev/gemini-api/docs/lyria-prompt-guide): genre first, instruments and how they sound, BPM, key, mood, a timed structure that fits the length, production style, seamless looping for game music, and the instrumental instruction when vocals are off.
+**Direct mode (default).** Loopsmith sends a short, fixed English frame and then your words, verbatim, last. The frame only sets the form, never a genre, tempo or key, so your prompt decides the style. This is the approach of the pudu-godot sound studio, which gave clearly better results than a long rewritten prompt. Example (loop, instrumental, context `Costa de Chiloé, Chile`):
 
-It receives tagged sections: `USER_PROMPT` (highest priority), `SETTINGS` (length, vocals, Lyria model, for example the fixed 30 seconds of the clip model), `BASE_TRACK` (the description of the base track when "use as base" is on), `TRACK_TYPE` (from the output folder: SOUNDTRACK, SFX, VO, AMBIENCE or OTHER) and `PROJECT_CONTEXT` (lowest priority).
+> Compose an original instrumental soundtrack for a video game. Make a seamless 16-second loop, with the ending flowing rhythmically and harmonically into the first beat. Begin immediately and continue past the loop point. Avoid an intro, final cadence, fade or silence. No vocals. Context: Costa de Chiloé, Chile. Musical direction: Utiliza el ritmo de vals en tonalidad mayor usando instrumentos como el violin y el acordeon
 
-**Your prompt always wins.** The system instruction and the request both state that when the project context conflicts with your prompt (context "8-bit retro", prompt "musica electronica"), the conflicting part of the context is dropped; the context only fills gaps. Example from a real run with context `8-bit retro`, prompt `musica electronica para nivel de discoteca, 16 segundos` and `lyria-3-clip-preview`:
+- With vocals on, "instrumental" and "No vocals" are left out.
+- "Con final / With ending" replaces the loop sentences with "Make a complete N-second piece that begins immediately and reaches a natural final cadence at N seconds. Avoid a long intro."
+- The piece is named by the output folder type: soundtrack (SOUNDTRACK, OTHER), ambient background soundscape (AMBIENCE), short musical sound effect (SFX), voice-centered piece (VO).
+- The project context is collapsed to one line and cut at 400 characters. With "use as base", the Gemini description of the base track is added before your direction.
+- Your prompt is last, so it has the final word: with context "8-bit" and prompt "musica electronica", Lyria reads the electronic request at the end.
 
-> High-energy nightclub electronic dance music at 126 BPM in F minor, designed to loop seamlessly without fade-in or fade-out. Driving four-on-the-floor kick, deep sidechained sub-bass, bright synth chord stabs, and crisp hi-hats create an intense dancefloor groove. [0:00 - 0:16] Immediately drops into the full driving peak-time rhythm with punchy kicks, pulsing bassline, and filtered synth sweeps. [0:16 - 0:30] Introduces sharp claps and energetic arpeggios, sustaining high club energy that seamlessly transitions back into the beginning. Crisp, modern, polished club mix with heavy low-end impact. Instrumental only, no vocals, no singing, no spoken words.
+**Pulir con IA / Polish with AI (optional).** A switch in the panel (default from `LOOPSMITH_PROMPT_MODE`). A Gemini text model (`LOOPSMITH_REFINE_MODEL`, temperature 0.25) lightly rewrites only the musical direction: it keeps your words and cultural references (named songs, composers, regional rhythms), invents no BPM, key or timing markers unless you gave them, writes 40 to 70 words in English, and drops whatever part of the project context conflicts with your prompt. Loopsmith then wraps that text in the same frame as direct mode, so the loop or ending wording, the length and the vocals instruction always come from code. If the call fails, the direct prompt is used. It costs a fraction of a cent.
 
-The history stores your original prompt, the project context, the refined prompt and the exact text sent to Lyria (shown in a collapsible section of the history). A switch in the generation panel skips refinement for one generation. If refinement fails (quota, network, empty answer) a warning is logged and the raw prompt is used, so generation never breaks because of it. The refinement call costs a fraction of a cent.
+The history stores your prompt, the polished direction (if any) and the exact text sent to Lyria; open "Prompts" on a history entry to compare them.
 
-### Duration
+### Duration and loops
 
-**Lyria has no duration parameter.** The Interactions API rejects fields such as `generation_config.duration` (`Unknown parameter`), the clip model is fixed at 30 seconds, and `lyria-3.5` and `lyria-3-pro-preview` ignore it in practice (in our tests, asking for 16 seconds in both the prompt and a timestamped structure returned 164 and 162 seconds). So Loopsmith does two things:
+**Lyria has no duration parameter** (the API rejects `generation_config.duration`, the clip model is fixed at 30 seconds, and `lyria-3.5` returns songs of two to three minutes whatever the prompt says). Loopsmith enforces the length locally:
 
-1. It asks for the length in the prompt with a timestamped structure (for example `[0:00 - 0:16]`), the method the docs recommend.
-2. If the result is still longer than the duration field (by more than half a second), it **cuts it locally** to that length with a 1.5 second fade-out (ffmpeg when installed, otherwise a built-in cutter). The untouched file is kept in `<project>/.loopsmith-untrimmed/`, and the history entry records the requested, generated and final lengths.
+- **Loop (default)**: the frame asks Lyria to start immediately and keep playing past the loop point. Loopsmith takes exactly N seconds and crossfades the 0.25 s Lyria played after N into the first 0.25 s (linear), then appends the untouched body, so playback wraps on consecutive samples with no fade-out and no gap. The result is 16-bit PCM WAV at 44.1 kHz stereo with exactly N x 44100 frames, decoded once from the model output (no MP3 re-encode). If the model output is only slightly longer than N, the seam is shortened; if it is not longer, the file is kept as is with a note. Without ffmpeg it falls back to a fade-out cut.
+- **Con final / With ending**: cut to N seconds with a 1.5 second fade-out (WAV with ffmpeg). Without a duration the piece is kept in full.
 
-Leave the duration empty to keep whatever length Lyria returns. With `lyria-3-clip-preview` you get 30 seconds, so durations up to 30 seconds are cut from that clip.
+The untouched model output is kept in `<project>/.loopsmith-untrimmed/` (hidden from the track list), and the history entry records the requested, generated and final lengths and the seam or fade used.
 
 ### Other notes
 
-- **Instrumental vs vocals**: Lyria has no separate "instrumental" parameter, so when vocals are off Loopsmith adds an explicit "Instrumental only, no vocals" instruction to the prompt, as recommended in the guide.
+- **Instrumental vs vocals**: Lyria has no separate "instrumental" parameter, so when vocals are off the frame says "instrumental" and "No vocals".
 - **Variants**: Lyria does not accept an audio file as input, so the "base track" option first asks a Gemini model to describe the track (genre, instruments, mood, tempo, key) and then sends that description plus your changes to Lyria.
 - Lyria only creates music. It works well for `SOUNDTRACK` and reasonably for `AMBIENCE`, not for real sound effects or voice lines. Those types are ready for future providers.
 - **Song structure is not lyrics**: Lyria returns a structure text with every track. For instrumentals it is only markers such as `[[A0]]` or `<instrumental>`; Loopsmith saves it as `structure` in the history and only shows real lyrics as lyrics.

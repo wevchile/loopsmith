@@ -26,6 +26,10 @@ export interface GeneratedAudioInfo {
   /** "ffmpeg" (re-encoded with a fade-out) or "js" (pure JavaScript cut). */
   trimMethod?: 'ffmpeg' | 'js';
   fadeOutSeconds?: number;
+  /** How the length was enforced: "loop-seam" (crossfaded loop point) or "fade-out" (natural ending). */
+  lengthMethod?: 'loop-seam' | 'fade-out';
+  /** Crossfade length at the loop point, in seconds (loop-seam only). */
+  seamSeconds?: number;
   /** Untouched model output, kept next to the project in a hidden folder. */
   untrimmedPath?: string;
   /** Why trimming was skipped or failed, if it was. */
@@ -35,6 +39,14 @@ export interface GeneratedAudioInfo {
 /** Review status of an AI track. Candidates compete to replace an original (manifest) sound. */
 export type TrackStatus = 'candidate' | 'chosen' | 'discarded';
 export const TRACK_STATUSES: readonly TrackStatus[] = ['candidate', 'chosen', 'discarded'];
+
+/** direct = deterministic prompt frame built in code (default); refine = a Gemini text model writes the musical direction. */
+export type PromptMode = 'direct' | 'refine';
+export const PROMPT_MODES: readonly PromptMode[] = ['direct', 'refine'];
+
+/** loop = seamless loop of exactly N seconds (default); ending = a piece with a natural ending and a fade-out. */
+export type EndingMode = 'loop' | 'ending';
+export const ENDING_MODES: readonly EndingMode[] = ['loop', 'ending'];
 
 export interface PromptRefinementInfo {
   /** refined = the model wrote the prompt; skipped = turned off; failed = error, raw prompt used. */
@@ -65,6 +77,10 @@ export interface GenerationHistory {
   /** Exact text sent to the music model. */
   finalPrompt?: string;
   refinement?: PromptRefinementInfo;
+  /** How the prompt was built. Entries written before prompt modes existed have none. */
+  promptMode?: PromptMode;
+  /** Loop (seamless, default) or with a natural ending. */
+  ending?: EndingMode;
   /** Requested vs generated vs saved length, and how the file was trimmed. */
   audio?: GeneratedAudioInfo;
   timestamp: string;
@@ -170,8 +186,10 @@ export interface GenerateRequest {
   vocalsEnabled: boolean;
   /** Desired duration in seconds. Providers may treat it as a hint. */
   duration?: number;
-  /** The prompt was already refined: send it as is (no extra length or instrumental text). */
+  /** The prompt is complete: send it as is (no extra length or instrumental text). */
   promptIsFinal?: boolean;
+  /** Model to use for this request (for example chosen by duration). Defaults to the provider model. */
+  model?: string;
   outputFormat?: AudioOutputFormat;
   referenceTrack?: {
     path: string;

@@ -7,6 +7,7 @@ import {
   DEFAULT_REFINE_MODEL,
   REFINER_SYSTEM_INSTRUCTION,
   buildRefinerUserMessage,
+  REFINE_TEMPERATURE,
   cleanRefinedPrompt,
   type RefineInput,
 } from './prompt-refiner.js';
@@ -16,6 +17,12 @@ import {
  * See https://ai.google.dev/gemini-api/docs/music-generation and https://ai.google.dev/gemini-api/docs/models
  */
 export const DEFAULT_LYRIA_MODEL = 'lyria-3.5';
+/** Model for short loops (duration up to SHORT_MODEL_MAX_SECONDS): fixed 30 s clips, cheaper and made for loops. */
+export const DEFAULT_LYRIA_MODEL_SHORT = 'lyria-3-clip-preview';
+/** Model for longer tracks or pieces without a duration. */
+export const DEFAULT_LYRIA_MODEL_LONG = DEFAULT_LYRIA_MODEL;
+/** Longest duration served by the short model (its 30 s clip must cover N plus the 0.25 s loop seam). */
+export const SHORT_MODEL_MAX_SECONDS = 29;
 /**
  * Gemini API version. Lyria models are only served on v1beta (on v1 the API answers
  * "404 Model 'lyria-3.5' not found"), while @google/genai defaults to v1.
@@ -307,28 +314,49 @@ export class GeminiLyriaProvider implements MusicProvider {
   private readonly client: GenAIClientLike;
   private readonly analysisModel: string;
   readonly refineModel: string;
+  /** LYRIA_MODEL: when set, every request uses it, whatever the duration. */
+  readonly modelOverride?: string;
+  /** LYRIA_MODEL_SHORT and LYRIA_MODEL_LONG: picked by duration when there is no override. */
+  readonly modelShort: string;
+  readonly modelLong: string;
+  /** Longest duration (seconds) that goes to the short model. */
+  readonly shortMaxSeconds: number;
   private readonly outputFormat: 'mp3' | 'wav';
 
   constructor(config: ProviderConfig, client?: GenAIClientLike) {
     if (!config.apiKey && !client) {
       throw new Error('GEMINI_API_KEY is required for the Gemini Lyria provider');
     }
-    this.model = config.lyriaModel || DEFAULT_LYRIA_MODEL;
-    this.modelInfo = getLyriaModelInfo(this.model);
-    if (this.modelInfo.api !== 'interactions') {
-      throw new Error(
-        `${this.model} is a real-time streaming model and cannot generate files. ` +
-          `Set LYRIA_MODEL to one of: ${LYRIA_MODELS.filter((m) => m.api === 'interactions').map((m) => m.id).join(', ')}.`
-      );
+    this.modelOverride = config.lyriaModel?.trim() || undefined;
+    this.modelShort = this.modelOverride ?? (config.lyriaModelShort?.trim() || DEFAULT_LYRIA_MODEL_SHORT);
+    this.modelLong = this.modelOverride ?? (config.lyriaModelLong?.trim() || DEFAULT_LYRIA_MODEL_LONG);
+    for (const [variable, id] of [
+      [this.modelOverride ? 'LYRIA_MODEL' : 'LYRIA_MODEL_SHORT', this.modelShort],
+      [this.modelOverride ? 'LYRIA_MODEL' : 'LYRIA_MODEL_LONG', this.modelLong],
+    ] as const) {
+      if (getLyriaModelInfo(id).api !== 'interactions') {
+        throw new Error(
+          `${id} is a real-time streaming model and cannot generate files. ` +
+            `Set ${variable} to one of: ${LYRIA_MODELS.filter((m) => m.api === 'interactions').map((m) => m.id).join(', ')} (default lyria-3.5).`
+        );
+      }
     }
-    this.name = `Google ${this.modelInfo.label}`;
+    const shortInfo = getLyriaModelInfo(this.modelShort);
+    const longInfo = getLyriaModelInfo(this.modelLong);
+    this.shortMaxSeconds = Math.min(
+      SHORT_MODEL_MAX_SECONDS,
+      shortInfo.fixedDurationSeconds ? shortInfo.fixedDurationSeconds - 1 : shortInfo.maxDurationSeconds
+    );
+    this.model = this.modelShort;
+    this.modelInfo = shortInfo;
+    this.name = this.modelOverride ? `Google ${shortInfo.label}` : `Google ${shortInfo.label} / ${longInfo.label}`;
     this.capabilities = {
       supportsInstrumental: true,
       supportsVocals: true,
       supportsReferenceAudio: false,
-      maxDurationSeconds: this.modelInfo.maxDurationSeconds,
-      ...(this.modelInfo.fixedDurationSeconds ? { fixedDurationSeconds: this.modelInfo.fixedDurationSeconds } : {}),
-      outputFormats: this.modelInfo.supportsWav ? ['mp3', 'wav'] : ['mp3'],
+      maxDurationSeconds: Math.max(shortInfo.maxDurationSeconds, longInfo.maxDurationSeconds),
+      ...(this.modelOverride && shortInfo.fixedDurationSeconds ? { fixedDurationSeconds: shortInfo.fixedDurationSeconds } : {}),
+      outputFormats: shortInfo.supportsWav || longInfo.supportsWav ? ['mp3', 'wav'] : ['mp3'],
     };
     this.analysisModel = config.analysisModel || DEFAULT_ANALYSIS_MODEL;
     this.refineModel = config.refineModel || DEFAULT_REFINE_MODEL;
@@ -336,14 +364,25 @@ export class GeminiLyriaProvider implements MusicProvider {
     this.client = client ?? createGenAIClient(config.apiKey as string, config.apiVersion || DEFAULT_API_VERSION);
   }
 
+  /**
+   * Model for a duration: LYRIA_MODEL when set; otherwise the short model up to shortMaxSeconds
+   * and the long model for longer tracks or when there is no duration.
+   */
+  selectModel(durationSeconds?: number): string {
+    if (this.modelOverride) return this.modelOverride;
+    return durationSeconds && durationSeconds > 0 && durationSeconds <= this.shortMaxSeconds ? this.modelShort : this.modelLong;
+  }
+
   async generate(request: GenerateRequest): Promise<GenerateResult> {
-    // A refined prompt already contains length, structure and the instrumental instruction.
-    const prompt = request.promptIsFinal ? request.prompt.trim() : buildLyriaPrompt(request, this.modelInfo);
+    const model = request.model ?? this.selectModel(request.duration);
+    const modelInfo = getLyriaModelInfo(model);
+    // A final prompt already contains the length, loop and instrumental wording.
+    const prompt = request.promptIsFinal ? request.prompt.trim() : buildLyriaPrompt(request, modelInfo);
     const requested = request.outputFormat ?? this.outputFormat;
     // Only Lyria 3.5 documents WAV output; ask the other models for their native MP3.
-    const format = requested === 'wav' && this.modelInfo.supportsWav ? 'wav' : 'mp3';
+    const format = requested === 'wav' && modelInfo.supportsWav ? 'wav' : 'mp3';
 
-    const params: LyriaInteractionParams = { model: this.model, input: prompt };
+    const params: LyriaInteractionParams = { model, input: prompt };
     if (format === 'wav') {
       params.response_format = { type: 'audio', mime_type: 'audio/wav' };
     }
@@ -369,7 +408,7 @@ export class GeminiLyriaProvider implements MusicProvider {
       lyrics,
       structure,
       metadata: {
-        model: this.model,
+        model,
         prompt,
         vocalsEnabled: request.vocalsEnabled,
         mimeType: parsed.mimeType,
@@ -378,15 +417,15 @@ export class GeminiLyriaProvider implements MusicProvider {
   }
 
   /** Asks a Gemini text model to turn the request into a polished Lyria prompt. */
-  async refinePrompt(input: Omit<RefineInput, 'lyriaModel'>): Promise<{ prompt: string; model: string }> {
+  async refinePrompt(input: RefineInput): Promise<{ prompt: string; model: string }> {
     const response = await this.client.models.generateContent({
       model: this.refineModel,
-      contents: [{ role: 'user', parts: [{ text: buildRefinerUserMessage({ ...input, lyriaModel: this.modelInfo }) }] }],
-      config: { systemInstruction: REFINER_SYSTEM_INSTRUCTION, temperature: 0.7 },
+      contents: [{ role: 'user', parts: [{ text: buildRefinerUserMessage(input) }] }],
+      config: { systemInstruction: REFINER_SYSTEM_INSTRUCTION, temperature: REFINE_TEMPERATURE },
     });
     const text = response.text?.trim();
     if (!text) throw new Error(`${this.refineModel} returned an empty prompt`);
-    return { prompt: cleanRefinedPrompt(text, input.vocalsEnabled, INSTRUMENTAL_DIRECTIVE), model: this.refineModel };
+    return { prompt: cleanRefinedPrompt(text), model: this.refineModel };
   }
 
   async analyzeReference(audioPath: string): Promise<string> {

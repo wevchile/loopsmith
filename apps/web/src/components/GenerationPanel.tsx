@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Sparkles } from 'lucide-react';
-import type { AudioTrack, Health, Project } from '../api';
+import type { AudioTrack, EndingMode, Health, Project } from '../api';
+
+/** Sound effects and voice pieces end; music and ambience loop (same rule as the server). */
+function defaultEnding(folder: string): EndingMode {
+  const type = folder.replace(/\\/g, '/').split('/').find(Boolean)?.toUpperCase();
+  return type === 'SFX' || type === 'VO' ? 'ending' : 'loop';
+}
 
 export interface GenerateInput {
   prompt: string;
@@ -10,6 +16,7 @@ export interface GenerateInput {
   referenceTrackId?: string;
   outputFolder: string;
   refinePrompt?: boolean;
+  ending: EndingMode;
 }
 
 interface Props {
@@ -38,7 +45,8 @@ export function GenerationPanel({
   const [vocals, setVocals] = useState(project.defaultVocalsEnabled);
   const [duration, setDuration] = useState('');
   const [outputFolder, setOutputFolder] = useState(defaultFolder || 'SOUNDTRACK');
-  const [refine, setRefine] = useState(true);
+  const [refine, setRefine] = useState(health?.generation.promptMode === 'refine');
+  const [ending, setEnding] = useState<EndingMode>(defaultEnding(defaultFolder || 'SOUNDTRACK'));
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -51,9 +59,24 @@ export function GenerationPanel({
     if (defaultFolder) setOutputFolder(defaultFolder);
   }, [defaultFolder]);
 
+  useEffect(() => {
+    setEnding(defaultEnding(outputFolder));
+  }, [outputFolder]);
+
+  useEffect(() => {
+    setRefine(health?.generation.promptMode === 'refine');
+  }, [health?.generation.promptMode]);
+
   const available = health?.generation.available ?? false;
   const refineAvailable = health?.generation.promptRefine?.enabled ?? false;
   const referenceReady = useReference && selectedTrack && selectedTrack.exists !== false;
+  const loopSeconds = health?.generation.defaultLoopSeconds ?? 16;
+  const seconds = duration ? Number(duration) : ending === 'loop' ? loopSeconds : undefined;
+  const models = health?.generation.models;
+  const model = models
+    ? (models.override ?? (seconds && seconds <= (models.shortMaxSeconds ?? 29) ? models.short : models.long))
+    : health?.generation.model;
+  const trimOn = health?.generation.trimToDuration !== false;
 
   const submit = async () => {
     setBusy(true);
@@ -65,7 +88,8 @@ export function GenerationPanel({
         duration: duration ? Number(duration) : undefined,
         referenceTrackId: referenceReady ? selectedTrack.id : undefined,
         outputFolder,
-        refinePrompt: refineAvailable ? refine : undefined,
+        refinePrompt: refineAvailable ? refine : false,
+        ending,
       });
       setResult({ ok: true, text: t('generationDone', { file }) });
       setPrompt('');
@@ -78,9 +102,10 @@ export function GenerationPanel({
 
   return (
     <div className="inspector-section">
-      {health?.generation.model && (
+      {model && (
         <p className="muted small">
-          {t('model')}: {health.generation.model}
+          {t('model')}: <strong>{model}</strong>
+          {models && !models.override && <span> · {t('modelByDuration', { short: models.short, long: models.long, max: models.shortMaxSeconds ?? 29 })}</span>}
         </p>
       )}
       <label>
@@ -96,6 +121,17 @@ export function GenerationPanel({
         </span>
       </label>
 
+      <div className="row ending-row">
+        <div className="segmented" role="group" aria-label={t('endingLabel')}>
+          <button type="button" className={ending === 'loop' ? 'active' : ''} aria-pressed={ending === 'loop'} onClick={() => setEnding('loop')} disabled={busy}>
+            {t('endingLoop')}
+          </button>
+          <button type="button" className={ending === 'ending' ? 'active' : ''} aria-pressed={ending === 'ending'} onClick={() => setEnding('ending')} disabled={busy}>
+            {t('endingWithEnd')}
+          </button>
+        </div>
+      </div>
+
       {refineAvailable && (
         <label className="switch">
           <input type="checkbox" checked={refine} onChange={(e) => setRefine(e.target.checked)} disabled={busy} />
@@ -104,6 +140,7 @@ export function GenerationPanel({
           </span>
         </label>
       )}
+      <p className="muted small">{refine && refineAvailable ? t('refineHelp') : t('directHelp')}</p>
 
       <label className="switch">
         <input type="checkbox" checked={useReference} onChange={(e) => onUseReferenceChange(e.target.checked)} disabled={busy} />
@@ -124,6 +161,7 @@ export function GenerationPanel({
             min={1}
             max={health?.generation.maxDurationSeconds || 240}
             value={duration}
+            placeholder={ending === 'loop' ? String(loopSeconds) : t('durationAuto')}
             onChange={(e) => setDuration(e.target.value)}
             disabled={busy}
           />
@@ -142,10 +180,13 @@ export function GenerationPanel({
 
       {health?.generation.available && (
         <p className="muted small">
-          {health.generation.fixedDurationSeconds
-            ? t('durationFixed', { seconds: health.generation.fixedDurationSeconds })
-            : t('durationHint')}
-          {health.generation.trimToDuration !== false && duration ? ` ${t('durationTrim', { seconds: duration })}` : ''}
+          {ending === 'loop'
+            ? trimOn
+              ? t('loopHint', { seconds, seam: health.generation.loopSeamSeconds ?? 0.25 })
+              : t('durationHint')
+            : seconds && trimOn
+              ? t('endingHint', { seconds, fade: health.generation.fadeOutSeconds ?? 1.5 })
+              : t('endingNoDuration')}
         </p>
       )}
 

@@ -1,5 +1,56 @@
 import { describe, it, expect } from 'vitest';
-import { readWav, trimWav, scanMp3, trimMp3, measureBuffer } from './audio-length.js';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { AudioTools, readWav, trimWav, scanMp3, trimMp3, measureBuffer } from './audio-length.js';
+
+const HAS_FFMPEG = spawnSync('ffmpeg', ['-version'], { windowsHide: true }).status === 0;
+
+/** 16-bit stereo 44.1 kHz WAV with a 220 Hz sine, so every sample position is distinguishable. */
+function sineWav(seconds: number): Buffer {
+  const rate = 44100;
+  const frames = Math.round(seconds * rate);
+  const buf = wav(seconds, rate, 2);
+  for (let f = 0; f < frames; f++) {
+    const v = Math.round(12000 * Math.sin((2 * Math.PI * 220 * f) / rate));
+    buf.writeInt16LE(v, 44 + f * 4);
+    buf.writeInt16LE(v, 44 + f * 4 + 2);
+  }
+  return buf;
+}
+
+describe.skipIf(!HAS_FFMPEG)('loop seam (ffmpeg)', () => {
+  it('writes exactly N seconds and wraps on consecutive samples of the model output', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'loopsmith-seam-'));
+    const input = path.join(dir, 'in.wav');
+    const output = path.join(dir, 'out.wav');
+    const source = sineWav(17);
+    await writeFile(input, source);
+    const result = await new AudioTools('ffmpeg').loopSeam(input, output, 16, 0.25);
+    const data = await readFile(output);
+    const info = readWav(data);
+    expect(result.frames).toBe(16 * 44100);
+    expect(info).toMatchObject({ sampleRate: 44100, channels: 2, bitsPerSample: 16 });
+    expect(info.dataLength / info.blockAlign).toBe(16 * 44100);
+    const sample = (buf: Buffer, offset: number, frame: number) => buf.readInt16LE(offset + frame * 4);
+    // The loop starts where the model was at 16 s and ends one sample before it: no jump at the wrap.
+    expect(Math.abs(sample(data, info.dataOffset, 0) - sample(source, 44, 16 * 44100))).toBeLessThanOrEqual(1);
+    expect(Math.abs(sample(data, info.dataOffset, 16 * 44100 - 1) - sample(source, 44, 16 * 44100 - 1))).toBeLessThanOrEqual(1);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('decodes MP3 once and still gives an exact frame count', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'loopsmith-seam-'));
+    const input = path.join(dir, 'in.mp3');
+    const output = path.join(dir, 'out.wav');
+    spawnSync('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=20', '-ac', '2', '-c:a', 'libmp3lame', input], { windowsHide: true });
+    await new AudioTools('ffmpeg').loopSeam(input, output, 16, 0.25);
+    const info = readWav(await readFile(output));
+    expect(info.dataLength / info.blockAlign).toBe(16 * 44100);
+    await rm(dir, { recursive: true, force: true });
+  });
+});
 
 /** 16-bit PCM WAV filled with a constant non-zero level so the fade-out is visible. */
 function wav(seconds: number, sampleRate = 8000, channels = 2): Buffer {

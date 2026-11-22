@@ -174,7 +174,43 @@ describe('ProviderRegistry', () => {
 
   it('registers Lyria when an API key is present', () => {
     const registry = ProviderRegistry.createDefault({ apiKey: 'test-key' });
-    expect(registry.getProvider('gemini-lyria')?.model).toBe(DEFAULT_LYRIA_MODEL);
+    const provider = registry.getProvider('gemini-lyria');
+    expect(provider?.modelShort).toBe('lyria-3-clip-preview');
+    expect(provider?.modelLong).toBe(DEFAULT_LYRIA_MODEL);
+  });
+});
+
+describe('model by duration', () => {
+  function provider(config: Record<string, string> = {}) {
+    const create = vi.fn().mockResolvedValue({ output_audio: { data: 'AA==', mime_type: 'audio/mpeg' } });
+    const c = { interactions: { create }, models: { generateContent: vi.fn() } } as unknown as GenAIClientLike;
+    return { p: new GeminiLyriaProvider(config, c), create };
+  }
+
+  it('uses the short clip model up to 29 s and lyria-3.5 for longer tracks or no duration', async () => {
+    const { p, create } = provider();
+    expect(p.selectModel(16)).toBe('lyria-3-clip-preview');
+    expect(p.selectModel(29)).toBe('lyria-3-clip-preview');
+    expect(p.selectModel(30)).toBe('lyria-3.5');
+    expect(p.selectModel(undefined)).toBe('lyria-3.5');
+    expect(p.capabilities.maxDurationSeconds).toBe(240);
+    expect(p.capabilities.fixedDurationSeconds).toBeUndefined();
+    await p.generate({ prompt: 'x', promptIsFinal: true, vocalsEnabled: false, duration: 16 });
+    await p.generate({ prompt: 'x', promptIsFinal: true, vocalsEnabled: false, duration: 60 });
+    expect(create.mock.calls.map((call) => call[0].model)).toEqual(['lyria-3-clip-preview', 'lyria-3.5']);
+  });
+
+  it('honors LYRIA_MODEL_SHORT / LYRIA_MODEL_LONG, and LYRIA_MODEL overrides both', async () => {
+    expect(provider({ lyriaModelShort: 'lyria-3.5', lyriaModelLong: 'lyria-3-pro-preview' }).p.selectModel(10)).toBe('lyria-3.5');
+    const { p, create } = provider({ lyriaModel: 'lyria-3-clip-preview' });
+    expect(p.selectModel(120)).toBe('lyria-3-clip-preview');
+    expect(p.capabilities.fixedDurationSeconds).toBe(30);
+    await p.generate({ prompt: 'x', promptIsFinal: true, vocalsEnabled: false, duration: 120, model: 'lyria-3.5' });
+    expect(create.mock.calls[0][0].model).toBe('lyria-3.5');
+  });
+
+  it('rejects the realtime model as the short or long model', () => {
+    expect(() => provider({ lyriaModelShort: 'lyria-realtime-exp' })).toThrow(/LYRIA_MODEL_SHORT/);
   });
 });
 

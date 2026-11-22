@@ -8,6 +8,9 @@ import path from 'node:path';
  * cut (WAV with fade-out, MP3 at a frame boundary without fade).
  */
 
+/** Sample rate of processed (looped or trimmed) WAV files. */
+export const LOOP_SAMPLE_RATE = 44_100;
+
 export interface TrimResult {
   method: 'ffmpeg' | 'js';
   fadeOutSeconds: number;
@@ -134,15 +137,46 @@ export class AudioTools {
     if (r.code !== 0) throw new Error(`ffmpeg conversion failed: ${r.stderr.trim().slice(0, 300)}`);
   }
 
+  /**
+   * Seamless loop of exactly `seconds` (ported from the pudu-godot sound studio). The `seamSeconds`
+   * the model played after the loop point are crossfaded into the first `seamSeconds`, then the
+   * untouched body follows, so playback wraps on consecutive samples. Decodes once and writes
+   * 16-bit PCM WAV at 44.1 kHz stereo: exactly round(seconds * 44100) frames.
+   * The input must be at least `seconds + seamSeconds` long (checked by the caller).
+   */
+  async loopSeam(input: string, output: string, seconds: number, seamSeconds: number): Promise<{ frames: number }> {
+    if (!(await this.hasFfmpeg())) throw new Error('ffmpeg is required for the loop seam');
+    const rate = LOOP_SAMPLE_RATE;
+    const total = Math.round(seconds * rate);
+    const seam = Math.max(1, Math.min(Math.round(seamSeconds * rate), Math.floor(total / 4)));
+    const graph = [
+      `[0:a]aresample=${rate},aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,asplit=3[head][body][tail]`,
+      `[head]atrim=end_sample=${seam},asetpts=PTS-STARTPTS,afade=t=in:ns=${seam}:curve=tri[h]`,
+      `[body]atrim=start_sample=${seam}:end_sample=${total},asetpts=PTS-STARTPTS[b]`,
+      `[tail]atrim=start_sample=${total}:end_sample=${total + seam},asetpts=PTS-STARTPTS,afade=t=out:ns=${seam}:curve=tri[t]`,
+      // Linear crossfade written as two fades and a sum (acrossfade drops inputs that are exactly as long as the fade).
+      `[t][h]amix=inputs=2:normalize=0:duration=longest[seam]`,
+      '[seam][b]concat=n=2:v=0:a=1[out]',
+    ].join(';');
+    const r = await run(this.ffmpegPath as string, [
+      '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-stream_loop', '-1', '-i', input,
+      '-filter_complex', graph, '-map', '[out]', '-map_metadata', '-1',
+      '-ar', String(rate), '-ac', '2', '-c:a', 'pcm_s16le', output,
+    ], 120_000);
+    if (r.code !== 0) throw new Error(`ffmpeg loop seam failed: ${r.stderr.trim().slice(0, 300)}`);
+    return { frames: total };
+  }
+
   /** Writes `input` cut to `seconds` (with a fade-out) to `output`. */
   async trim(input: string, output: string, seconds: number, fadeOutSeconds: number): Promise<TrimResult> {
     const fade = Math.max(0, Math.min(fadeOutSeconds, seconds / 4));
     const ext = path.extname(output).toLowerCase();
     if (await this.hasFfmpeg()) {
-      const codec = ext === '.wav' ? ['-c:a', 'pcm_s16le'] : ['-c:a', 'libmp3lame', '-b:a', '192k'];
+      // WAV output is the lossless chain: 16-bit PCM at 44.1 kHz stereo, decoded once from the model output.
+      const codec = ext === '.wav' ? ['-ar', String(LOOP_SAMPLE_RATE), '-ac', '2', '-c:a', 'pcm_s16le'] : ['-c:a', 'libmp3lame', '-b:a', '192k'];
       const filter = fade > 0 ? ['-af', `afade=t=out:st=${(seconds - fade).toFixed(3)}:d=${fade.toFixed(3)}`] : [];
       const r = await run(this.ffmpegPath as string, [
-        '-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-t', seconds.toFixed(3), ...filter, '-map_metadata', '0', ...codec, output,
+        '-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', input, '-t', seconds.toFixed(3), ...filter, '-map_metadata', '-1', ...codec, output,
       ]);
       if (r.code === 0) return { method: 'ffmpeg', fadeOutSeconds: fade };
       throw new Error(`ffmpeg failed: ${r.stderr.trim().slice(0, 300)}`);

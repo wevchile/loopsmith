@@ -15,7 +15,12 @@ async function main() {
   if (!config.geminiApiKey) {
     app.log.warn('GEMINI_API_KEY is not set: browsing, folders and manifests work, music generation is disabled.');
   } else {
-    app.log.info(`Music generation enabled with model ${config.lyriaModel}`);
+    app.log.info(
+      config.lyriaModel
+        ? `Music generation enabled with model ${config.lyriaModel} (LYRIA_MODEL overrides the short/long pair)`
+        : `Music generation enabled: ${config.lyriaModelShort} up to 29 s, ${config.lyriaModelLong} for longer tracks`
+    );
+    app.log.info(`Prompt mode: ${config.promptMode}`);
   }
   app.log.info(`Storage roots: ${config.allowedRoots.join(', ')}`);
 

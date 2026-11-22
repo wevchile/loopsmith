@@ -20,6 +20,8 @@ export function HistoryPanel({ history, onSelectTrack }: Props) {
               {h.vocalsEnabled ? t('withVocals') : t('instrumental')}
             </div>
             {h.status && <StatusBadge status={h.status} />}
+            {h.promptMode && <span className="badge mode">{h.promptMode === 'refine' ? t('modeRefine') : t('modeDirect')}</span>}
+            {h.ending && <span className="badge mode">{h.ending === 'loop' ? t('endingLoop') : t('endingWithEnd')}</span>}
             <div>{h.prompt}</div>
             {h.referenceTrackId && (
               <div className="small muted">
@@ -29,15 +31,28 @@ export function HistoryPanel({ history, onSelectTrack }: Props) {
             {h.audio?.finalSeconds !== undefined && (
               <div className="small muted">
                 {h.audio.trimmed
-                  ? t('trimmedFrom', { final: h.audio.finalSeconds.toFixed(1), generated: h.audio.generatedSeconds?.toFixed(1) })
+                  ? h.audio.lengthMethod === 'loop-seam'
+                    ? t('loopFrom', { final: h.audio.finalSeconds.toFixed(1), generated: h.audio.generatedSeconds?.toFixed(1), seam: h.audio.seamSeconds })
+                    : t('trimmedFrom', { final: h.audio.finalSeconds.toFixed(1), generated: h.audio.generatedSeconds?.toFixed(1) })
                   : t('lengthSeconds', { seconds: h.audio.finalSeconds.toFixed(1) })}
               </div>
             )}
             {h.refinement?.status === 'failed' && <div className="small error-text">{t('refineFailed')}</div>}
             {(h.finalPrompt || h.refinedPrompt) && (
               <details className="small" onClick={(e) => e.stopPropagation()}>
-                <summary>{h.refinement?.status === 'refined' ? t('refinedPrompt', { model: h.refinement.model }) : t('sentPrompt')}</summary>
-                <pre className="lyrics">{h.finalPrompt ?? h.refinedPrompt}</pre>
+                <summary>{t('promptsTitle')}</summary>
+                <div className="prompt-compare">
+                  <div className="muted">{t('yourPrompt')}</div>
+                  <pre className="lyrics">{h.prompt}</pre>
+                  {h.refinement?.status === 'refined' && h.refinedPrompt && (
+                    <>
+                      <div className="muted">{t('refinedPrompt', { model: h.refinement.model })}</div>
+                      <pre className="lyrics">{h.refinedPrompt}</pre>
+                    </>
+                  )}
+                  <div className="muted">{t('sentPrompt')}</div>
+                  <pre className="lyrics">{h.finalPrompt ?? h.refinedPrompt}</pre>
+                </div>
               </details>
             )}
             {h.lyrics && (

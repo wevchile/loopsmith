@@ -2,71 +2,56 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   PRIORITY_RULE,
   REFINER_SYSTEM_INSTRUCTION,
+  REFINE_TEMPERATURE,
   DEFAULT_REFINE_MODEL,
   buildRefinerUserMessage,
   cleanRefinedPrompt,
   trackTypeFromFolder,
 } from './prompt-refiner.js';
-import { GeminiLyriaProvider, INSTRUMENTAL_DIRECTIVE, type GenAIClientLike } from './gemini-lyria.js';
-
-const clip = { id: 'lyria-3-clip-preview', label: 'Lyria 3 Clip (preview)', fixedDurationSeconds: 30 };
-const full = { id: 'lyria-3.5', label: 'Lyria 3.5' };
+import { GeminiLyriaProvider, type GenAIClientLike } from './gemini-lyria.js';
 
 describe('buildRefinerUserMessage', () => {
   const message = buildRefinerUserMessage({
-    userPrompt: 'musica electronica para nivel de discoteca, 16 segundos',
+    userPrompt: 'musica electronica para nivel de discoteca',
     projectContext: '8-bit retro',
     durationSeconds: 16,
     vocalsEnabled: false,
     trackType: 'SOUNDTRACK',
     outputFolder: 'SOUNDTRACK',
-    lyriaModel: full,
   });
 
   it('puts the user prompt first, marked as the highest priority, and the context last', () => {
     expect(message.startsWith('<USER_PROMPT priority="highest">\nmusica electronica')).toBe(true);
     expect(message.indexOf('<USER_PROMPT')).toBeLessThan(message.indexOf('<PROJECT_CONTEXT'));
     expect(message).toMatch(/<PROJECT_CONTEXT priority="lowest"[^>]*>\n8-bit retro\n<\/PROJECT_CONTEXT>/);
-  });
-
-  it('repeats the priority rule and includes all settings', () => {
     expect(message).toContain(PRIORITY_RULE);
-    expect(message).toContain('Target length: 16 seconds');
-    expect(message).toContain('Vocals: OFF (instrumental only)');
-    expect(message).toContain('Lyria model: lyria-3.5');
-    expect(message).toContain('<BASE_TRACK');
-    expect(message).toContain('(none)');
   });
 
-  it('explains the fixed 30 s length of the clip model', () => {
-    const m = buildRefinerUserMessage({ userPrompt: 'x', vocalsEnabled: true, durationSeconds: 16, lyriaModel: clip });
-    expect(m).toContain('30 seconds generated (fixed by the model); the first 16 seconds will be used');
-    expect(m).toContain('Vocals: allowed');
+  it('leaves length, loop and vocals out (the frame adds them in code)', () => {
+    expect(message).not.toMatch(/Target length|Vocals:|Lyria model/);
   });
 
   it('includes the base track description', () => {
-    const m = buildRefinerUserMessage({ userPrompt: 'faster', vocalsEnabled: false, referenceDescription: 'slow piano', lyriaModel: full });
+    const m = buildRefinerUserMessage({ userPrompt: 'faster', vocalsEnabled: false, referenceDescription: 'slow piano' });
     expect(m).toMatch(/<BASE_TRACK[^>]*>\nslow piano/);
   });
 });
 
-describe('system instruction', () => {
-  it('states that the user prompt wins over the project context', () => {
+describe('light refiner instruction', () => {
+  it('keeps the user words and references and invents no tempo, key or timing markers', () => {
     expect(REFINER_SYSTEM_INSTRUCTION).toContain(PRIORITY_RULE);
-    expect(PRIORITY_RULE).toMatch(/USER_PROMPT always has the highest priority/);
-    expect(REFINER_SYSTEM_INSTRUCTION).toContain('USER_PROMPT > SETTINGS');
-    expect(REFINER_SYSTEM_INSTRUCTION).toMatch(/BPM/);
-    expect(REFINER_SYSTEM_INSTRUCTION).toMatch(/loop seamlessly/);
+    expect(REFINER_SYSTEM_INSTRUCTION).toMatch(/named songs, composers or pieces exactly as written/);
+    expect(REFINER_SYSTEM_INSTRUCTION).toMatch(/Do not invent a tempo \(BPM\), key/);
+    expect(REFINER_SYSTEM_INSTRUCTION).toMatch(/40 to 70 words/);
+    expect(REFINER_SYSTEM_INSTRUCTION).not.toMatch(/Never name real artists/);
+    expect(REFINE_TEMPERATURE).toBeLessThanOrEqual(0.3);
   });
 });
 
 describe('cleanRefinedPrompt', () => {
-  it('strips fences, labels and quotes and enforces the instrumental instruction', () => {
-    expect(cleanRefinedPrompt('```\nPrompt: "Techno at 128 BPM"\n```', false, INSTRUMENTAL_DIRECTIVE)).toBe(
-      `Techno at 128 BPM\n\n${INSTRUMENTAL_DIRECTIVE}`
-    );
-    expect(cleanRefinedPrompt(`House. ${INSTRUMENTAL_DIRECTIVE}`, false, INSTRUMENTAL_DIRECTIVE)).toBe(`House. ${INSTRUMENTAL_DIRECTIVE}`);
-    expect(cleanRefinedPrompt('Pop song', true, INSTRUMENTAL_DIRECTIVE)).toBe('Pop song');
+  it('strips fences, labels and quotes and joins lines', () => {
+    expect(cleanRefinedPrompt('```\nPrompt: "Chilote waltz with accordion"\n```')).toBe('Chilote waltz with accordion');
+    expect(cleanRefinedPrompt('Musical direction: Harp\nand piano')).toBe('Harp and piano');
   });
 });
 
@@ -85,26 +70,19 @@ describe('GeminiLyriaProvider.refinePrompt', () => {
     return { c: { interactions: { create }, models: { generateContent } } as unknown as GenAIClientLike, generateContent, create };
   }
 
-  it('sends the system instruction with the priority rule and the structured sections', async () => {
-    const { c, generateContent } = client('Electronic house track, 126 BPM, four-on-the-floor kick.');
-    const provider = new GeminiLyriaProvider({ lyriaModel: 'lyria-3-clip-preview' }, c);
+  it('sends the light instruction at a low temperature and returns only the direction', async () => {
+    const { c, generateContent } = client('Chilote waltz in a major key with violin, accordion, guitar and a drum.');
+    const provider = new GeminiLyriaProvider({}, c);
     const result = await provider.refinePrompt({
-      userPrompt: 'musica electronica para nivel de discoteca',
-      projectContext: '8-bit retro',
-      durationSeconds: 16,
+      userPrompt: 'vals en tonalidad mayor con violin y acordeon',
+      projectContext: 'Costa de Chiloe',
       vocalsEnabled: false,
     });
     const params = generateContent.mock.calls[0][0];
     expect(params.model).toBe(DEFAULT_REFINE_MODEL);
-    expect(params.config.systemInstruction).toContain(PRIORITY_RULE);
-    const text = params.contents[0].parts[0].text as string;
-    expect(text).toContain('<USER_PROMPT priority="highest">');
-    expect(text).toContain('8-bit retro');
-    expect(text).toContain(PRIORITY_RULE);
-    expect(text).toContain('lyria-3-clip-preview');
-    expect(result.model).toBe(DEFAULT_REFINE_MODEL);
-    expect(result.prompt).toContain('126 BPM');
-    expect(result.prompt).toContain(INSTRUMENTAL_DIRECTIVE);
+    expect(params.config).toMatchObject({ systemInstruction: REFINER_SYSTEM_INSTRUCTION, temperature: REFINE_TEMPERATURE });
+    expect(params.contents[0].parts[0].text).toContain('Costa de Chiloe');
+    expect(result).toEqual({ prompt: 'Chilote waltz in a major key with violin, accordion, guitar and a drum.', model: DEFAULT_REFINE_MODEL });
   });
 
   it('uses the configured refine model and propagates errors', async () => {
@@ -117,7 +95,7 @@ describe('GeminiLyriaProvider.refinePrompt', () => {
   it('sends a final prompt to Lyria as is', async () => {
     const { c, create } = client('');
     const provider = new GeminiLyriaProvider({}, c);
-    await provider.generate({ prompt: 'Refined text', promptIsFinal: true, vocalsEnabled: false, duration: 16 });
-    expect(create.mock.calls[0][0].input).toBe('Refined text');
+    await provider.generate({ prompt: 'Framed text', promptIsFinal: true, vocalsEnabled: false, duration: 16 });
+    expect(create.mock.calls[0][0].input).toBe('Framed text');
   });
 });

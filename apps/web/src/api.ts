@@ -83,6 +83,9 @@ export interface RevertPreview {
   current: { exists: boolean; matchesReplacement: boolean; action: 'delete' | 'keep'; keepRelativePath?: string };
 }
 
+export type PromptMode = 'direct' | 'refine';
+export type EndingMode = 'loop' | 'ending';
+
 export interface GenerationHistory {
   id: string;
   prompt: string;
@@ -97,12 +100,17 @@ export interface GenerationHistory {
   refinedPrompt?: string;
   finalPrompt?: string;
   refinement?: { status: 'refined' | 'skipped' | 'failed'; model?: string; error?: string };
+  promptMode?: PromptMode;
+  ending?: EndingMode;
   audio?: {
     requestedSeconds?: number;
     generatedSeconds?: number;
     finalSeconds?: number;
     trimmed: boolean;
     trimMethod?: 'ffmpeg' | 'js';
+    lengthMethod?: 'loop-seam' | 'fade-out';
+    seamSeconds?: number;
+    fadeOutSeconds?: number;
     untrimmedPath?: string;
     note?: string;
   };
@@ -131,7 +139,14 @@ export interface Health {
     maxDurationSeconds?: number;
     fixedDurationSeconds?: number;
     trimToDuration?: boolean;
+    /** Models picked by duration (override = LYRIA_MODEL, used for everything). */
+    models?: { short: string; long: string; override?: string; shortMaxSeconds?: number };
+    /** Default prompt mode from LOOPSMITH_PROMPT_MODE. */
+    promptMode?: PromptMode;
     promptRefine?: { enabled: boolean; model: string };
+    defaultLoopSeconds?: number;
+    loopSeamSeconds?: number;
+    fadeOutSeconds?: number;
     reason?: string;
     message?: string;
   };
@@ -264,5 +279,6 @@ export const api = {
     referenceTrackId?: string;
     outputFolder: string;
     refinePrompt?: boolean;
+    ending?: EndingMode;
   }) => request<{ entry: GenerationHistory }>('/api/generate', { method: 'POST', json: body }).then((d) => d.entry),
 };

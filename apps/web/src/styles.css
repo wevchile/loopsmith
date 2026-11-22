@@ -321,3 +321,11 @@ button.link:hover { text-decoration: underline; }
 .path-name { font-weight: 600; font-size: 13px; }
 .path-full { font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .confirm-check { font-weight: 600; color: #ffe0b0; }
+
+/* Prompt mode and ending badges, raw vs sent prompt */
+.badge.mode { color: var(--text-dim); background: rgba(143, 163, 192, 0.1); border-color: rgba(143, 163, 192, 0.25); margin-left: 4px; }
+.prompt-compare { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.prompt-compare pre { margin: 0 0 6px; }
+.ending-row { align-items: center; }
+.seam-btn { display: inline-flex; align-items: center; gap: 4px; }
+.seam-btn.active { color: var(--accent) !important; border-color: var(--accent) !important; background: var(--accent-soft) !important; }

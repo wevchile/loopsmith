@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { ProviderRegistry, type MusicProvider } from '@loopsmith/providers';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import { AudioTools } from './audio-length.js';
+import { AudioTools, readWav } from './audio-length.js';
 
 /** Builds a tiny valid PCM WAV file (mono, 8 kHz, silence). */
 function tinyWav(samples = 800): Buffer {
@@ -230,7 +230,14 @@ describe('generation with a fake provider', () => {
     expect(first.statusCode).toBe(201);
     const entry = first.json().entry;
     expect(calls[0].vocalsEnabled).toBe(false);
-    expect(calls[0].prompt).toContain('8-bit');
+    // Direct mode: fixed frame, context, then the user prompt verbatim and last.
+    expect(calls[0].prompt).toMatch(/^Compose an original instrumental soundtrack for a video game\. Make a seamless 16-second loop/);
+    expect(calls[0].prompt).toContain('Context: 8-bit.');
+    expect(calls[0].prompt.endsWith('Musical direction: Overworld theme')).toBe(true);
+    expect(entry).toMatchObject({ promptMode: 'direct', ending: 'loop', model: 'fake-1', finalPrompt: calls[0].prompt });
+    // The fake output (0.1 s) is shorter than the default 16 s loop: kept as is, with a note.
+    expect(entry.audio).toMatchObject({ requestedSeconds: 16, trimmed: false });
+    expect(entry.audio.note).toMatch(/kept as is/);
     await access(entry.outputPath);
     expect(entry.outputTrackId.startsWith('local:SOUNDTRACK/')).toBe(true);
 
@@ -241,7 +248,8 @@ describe('generation with a fake provider', () => {
       payload: { projectId: project.id, prompt: 'faster', referenceTrackId: entry.outputTrackId, vocalsEnabled: true, outputFolder: 'OTHER' },
     });
     expect(second.statusCode).toBe(201);
-    expect(calls[1].prompt).toContain('slow ambient pad');
+    expect(calls[1].prompt).toContain('Base track to vary: slow ambient pad in A minor.');
+    expect(calls[1].prompt).not.toMatch(/instrumental|No vocals/);
     expect(calls[1].vocalsEnabled).toBe(true);
 
     const badFolder = await app.inject({
@@ -289,7 +297,9 @@ describe('duration enforcement', () => {
     const res = await app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'jingle', duration: 2 } });
     expect(res.statusCode).toBe(201);
     const { entry } = res.json();
-    expect(entry.audio).toMatchObject({ requestedSeconds: 2, generatedSeconds: 4, finalSeconds: 2, trimmed: true, trimMethod: 'js' });
+    // Without ffmpeg the loop seam is not available: falls back to a cut with a fade-out.
+    expect(entry.audio).toMatchObject({ requestedSeconds: 2, generatedSeconds: 4, finalSeconds: 2, trimmed: true, trimMethod: 'js', lengthMethod: 'fade-out' });
+    expect(entry.audio.note).toMatch(/ffmpeg not found/);
     expect(entry.structure).toBe('[[A0]]');
     expect(entry.lyrics).toBeUndefined();
     await access(entry.audio.untrimmedPath);
@@ -318,12 +328,35 @@ describe('duration enforcement', () => {
     await rm(noKeep.tmp, { recursive: true, force: true });
   });
 
-  it.skipIf(!HAS_FFMPEG)('uses ffmpeg with a fade-out when it is installed', async () => {
+  it.skipIf(!HAS_FFMPEG)('builds an exact loop with a crossfaded seam as 16-bit 44.1 kHz stereo WAV', async () => {
     const { tmp, app, project } = await setup(new AudioTools('ffmpeg'));
     const { entry } = (await app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'x', duration: 1.5 } })).json();
-    expect(entry.audio.trimMethod).toBe('ffmpeg');
-    expect(entry.audio.finalSeconds).toBeCloseTo(1.5, 1);
-    expect(entry.audio.fadeOutSeconds).toBeGreaterThan(0);
+    expect(entry.audio).toMatchObject({ trimmed: true, trimMethod: 'ffmpeg', lengthMethod: 'loop-seam', seamSeconds: 0.25, generatedSeconds: 4 });
+    expect(entry.audio.fadeOutSeconds).toBeUndefined();
+    expect(entry.outputPath.endsWith('.wav')).toBe(true);
+    const wav = readWav(await readFile(entry.outputPath));
+    expect(wav).toMatchObject({ sampleRate: 44100, channels: 2, bitsPerSample: 16 });
+    expect(wav.dataLength / wav.blockAlign).toBe(1.5 * 44100);
+    await access(entry.audio.untrimmedPath);
+    await app.close();
+    await rm(tmp, { recursive: true, force: true });
+  });
+
+  it.skipIf(!HAS_FFMPEG)('uses a fade-out for "Con final" and a shorter seam when the output barely covers the loop', async () => {
+    const { tmp, app, project } = await setup(new AudioTools('ffmpeg'));
+    const gen = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'x', ...payload } }).then((r) => r.json().entry);
+    const ending = await gen({ duration: 1.5, ending: 'ending' });
+    expect(ending).toMatchObject({ ending: 'ending', audio: { lengthMethod: 'fade-out', trimMethod: 'ffmpeg' } });
+    expect(ending.audio.fadeOutSeconds).toBeGreaterThan(0);
+    expect(ending.finalPrompt).toContain('natural final cadence at 2 seconds');
+    const tight = await gen({ duration: 3.9 });
+    expect(tight.audio).toMatchObject({ lengthMethod: 'loop-seam', seamSeconds: 0.09 });
+    const tightWav = readWav(await readFile(tight.outputPath));
+    expect(tightWav.dataLength / tightWav.blockAlign).toBe(Math.round(3.9 * 44100));
+    const tooShort = await gen({ duration: 8 });
+    expect(tooShort.audio).toMatchObject({ trimmed: false });
+    expect(tooShort.audio.note).toMatch(/kept as is/);
     await app.close();
     await rm(tmp, { recursive: true, force: true });
   });
@@ -371,8 +404,8 @@ describe('prompt refinement', () => {
     return { tmp, app, prompts, refineCalls, generate };
   }
 
-  it('sends the refined prompt and records original, context and refined prompt', async () => {
-    const t = await setup(async () => ({ prompt: 'Electronic club track, 126 BPM', model: 'gemini-test' }));
+  it('wraps the refined direction in the frame and records original, context and refined prompt', async () => {
+    const t = await setup(async () => ({ prompt: 'Electronic club track, 126 BPM', model: 'gemini-test' }), { LOOPSMITH_PROMPT_MODE: 'refine' });
     const res = await t.generate({ prompt: 'musica electronica para nivel de discoteca', duration: 16, outputFolder: 'SOUNDTRACK' });
     expect(res.statusCode).toBe(201);
     const { entry } = res.json();
@@ -383,46 +416,82 @@ describe('prompt refinement', () => {
       vocalsEnabled: false,
       trackType: 'SOUNDTRACK',
     });
-    expect(t.prompts[0]).toMatchObject({ prompt: 'Electronic club track, 126 BPM', promptIsFinal: true });
+    const sent = t.prompts[0].prompt;
+    expect(t.prompts[0].promptIsFinal).toBe(true);
+    expect(sent).toMatch(/^Compose an original instrumental soundtrack for a video game\. Make a seamless 16-second loop/);
+    expect(sent.endsWith('Musical direction: Electronic club track, 126 BPM')).toBe(true);
+    // The refiner already weighed the context, so the frame does not repeat it.
+    expect(sent).not.toContain('8-bit');
     expect(entry).toMatchObject({
       prompt: 'musica electronica para nivel de discoteca',
       context: '8-bit retro',
       refinedPrompt: 'Electronic club track, 126 BPM',
-      finalPrompt: 'Electronic club track, 126 BPM',
+      finalPrompt: sent,
+      promptMode: 'refine',
       refinement: { status: 'refined', model: 'gemini-test' },
     });
     await t.app.close();
     await rm(t.tmp, { recursive: true, force: true });
   });
 
-  it('falls back to the raw prompt when refinement fails', async () => {
+  it('falls back to the direct prompt when refinement fails', async () => {
     const t = await setup(async () => {
       throw new Error('429 quota');
     });
-    const res = await t.generate({ prompt: 'boss theme' });
+    const res = await t.generate({ prompt: 'boss theme', refinePrompt: true });
     expect(res.statusCode).toBe(201);
     const { entry } = res.json();
-    expect(t.prompts[0].promptIsFinal).toBeUndefined();
-    expect(t.prompts[0].prompt).toContain('boss theme');
+    expect(t.prompts[0].prompt.endsWith('Context: 8-bit retro. Musical direction: boss theme')).toBe(true);
+    expect(entry.finalPrompt).toBe(entry.composedPrompt);
     expect(entry.refinement).toMatchObject({ status: 'failed', error: '429 quota' });
     expect(entry.refinedPrompt).toBeUndefined();
     await t.app.close();
     await rm(t.tmp, { recursive: true, force: true });
   });
 
-  it('can be skipped per generation or turned off in .env', async () => {
+  it('is off by default (direct mode) and can be switched per generation or in .env', async () => {
     const t = await setup(async () => ({ prompt: 'never', model: 'm' }));
-    const skipped = (await t.generate({ prompt: 'x', refinePrompt: false })).json().entry;
-    expect(skipped.refinement.status).toBe('skipped');
+    const direct = (await t.generate({ prompt: 'x' })).json().entry;
+    expect(direct).toMatchObject({ promptMode: 'direct', refinement: { status: 'skipped' } });
     expect(t.refineCalls).toHaveLength(0);
+    const forced = (await t.generate({ prompt: 'x', refinePrompt: true })).json().entry;
+    expect(forced).toMatchObject({ promptMode: 'refine', refinement: { status: 'refined' } });
     await t.app.close();
     await rm(t.tmp, { recursive: true, force: true });
 
-    const off = await setup(async () => ({ prompt: 'never', model: 'm' }), { LOOPSMITH_PROMPT_REFINE: 'false' });
-    expect((await off.generate({ prompt: 'x' })).json().entry.refinement.status).toBe('skipped');
-    const forced = (await off.generate({ prompt: 'x', refinePrompt: true })).json().entry;
-    expect(forced.refinement.status).toBe('refined');
-    await off.app.close();
-    await rm(off.tmp, { recursive: true, force: true });
+    const on = await setup(async () => ({ prompt: 'never', model: 'm' }), { LOOPSMITH_PROMPT_MODE: 'refine' });
+    expect((await on.generate({ prompt: 'x' })).json().entry.promptMode).toBe('refine');
+    expect((await on.generate({ prompt: 'x', refinePrompt: false })).json().entry.refinement.status).toBe('skipped');
+    await on.app.close();
+    await rm(on.tmp, { recursive: true, force: true });
+  });
+
+  it('passes the model chosen by duration to the provider and records it', async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'loopsmith-model-'));
+    const models: Array<string | undefined> = [];
+    const fake: MusicProvider = {
+      id: 'fake',
+      name: 'Fake',
+      model: 'short-1',
+      capabilities: { supportsInstrumental: true, supportsVocals: true, supportsReferenceAudio: false, maxDurationSeconds: 240, outputFormats: ['wav'] },
+      selectModel: (seconds) => (seconds && seconds <= 29 ? 'short-1' : 'long-1'),
+      async generate(req) {
+        models.push(req.model);
+        return { audioData: tinyWav(), format: 'wav', metadata: { model: req.model } };
+      },
+    };
+    const registry = new ProviderRegistry();
+    registry.registerProvider(fake);
+    const app = await buildApp(loadConfig({ LOOPSMITH_ROOTS: './data' }, tmp), { logger: false, providerRegistry: registry, audioTools: new AudioTools(false) });
+    const { project } = (await app.inject({ method: 'POST', url: '/api/projects', headers: HOST, payload: { name: 'M' } })).json();
+    const gen = (payload: Record<string, unknown>) =>
+      app.inject({ method: 'POST', url: '/api/generate', headers: HOST, payload: { projectId: project.id, prompt: 'x', ...payload } }).then((r) => r.json().entry);
+    expect((await gen({})).model).toBe('short-1');
+    expect((await gen({ duration: 90 })).model).toBe('long-1');
+    expect((await gen({ ending: 'ending' })).model).toBe('long-1');
+    expect((await gen({ outputFolder: 'SFX' })).ending).toBe('ending');
+    expect(models).toEqual(['short-1', 'long-1', 'long-1', 'long-1']);
+    await app.close();
+    await rm(tmp, { recursive: true, force: true });
   });
 });
