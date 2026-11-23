@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://loopsmith.dev/schemas/manifest.schema.json",
+  "title": "Loopsmith Manifest",
+  "description": "Schema for Loopsmith game audio manifests",
+  "type": "object",
+  "required": ["version", "gameRepo", "entries"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Manifest version (e.g., '1.0')",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "gameRepo": {
+      "type": "string",
+      "description": "Name or path of the game repository"
+    },
+    "entries": {
+      "type": "array",
+      "description": "List of audio files in the game",
+      "items": {
+        "$ref": "#/definitions/manifestEntry"
+      }
+    },
+    "lastSync": {
+      "type": "string",
+      "description": "ISO 8601 timestamp of last sync",
+      "format": "date-time"
+    }
+  },
+  "definitions": {
+    "manifestEntry": {
+      "type": "object",
+      "required": ["id", "name", "type", "folder", "relativePath"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique stable identifier for this audio file"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the audio file"
+        },
+        "type": {
+          "type": "string",
+          "description": "Audio type classification",
+          "enum": ["SOUNDTRACK", "SFX", "VO", "AMBIENCE", "OTHER"]
+        },
+        "folder": {
+          "type": "string",
+          "description": "Folder path relative to audio root"
+        },
+        "relativePath": {
+          "type": "string",
+          "description": "Full relative path to the audio file from game root"
+        },
+        "hash": {
+          "type": "string",
+          "description": "Content hash (e.g., SHA-256) for change detection"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Duration in seconds",
+          "minimum": 0
+        },
+        "loopMarkers": {
+          "type": "object",
+          "description": "Loop start and end points",
+          "required": ["start", "end"],
+          "properties": {
+            "start": {
+              "type": "number",
+              "description": "Loop start time in seconds",
+              "minimum": 0
+            },
+            "end": {
+              "type": "number",
+              "description": "Loop end time in seconds",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

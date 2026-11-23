@@ -1,0 +1,24 @@
+{
+  "name": "loopsmith",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsc -b && concurrently -k -n web,server -c cyan,magenta \"pnpm --filter @loopsmith/web dev\" \"pnpm --filter @loopsmith/server dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "tsc -b && pnpm --filter @loopsmith/web typecheck",
+    "lint": "pnpm typecheck",
+    "test": "tsc -b && pnpm -r test",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  }
+}
